@@ -3,47 +3,38 @@
 Defines a concrete workflow graph that models a typical agent task:
   START → classify_intent → handle_task → summarize → END
 
-Also provides a mock LLM call helper (no real API dependency for the demo).
+Uses DeepSeek API for real LLM calls.
 """
 
 from __future__ import annotations
 
 import logging
-import random
-import time
-from typing import Any
+from typing import Any, Optional
 
+from src.core.llm import DeepSeekLLM
 from src.core.types import Artifact, Event, Priority
 from src.workflow.engine import WorkflowContext, WorkflowEngine, WorkflowNode
 
 logger = logging.getLogger(__name__)
 
-# ── Mock LLM (for demo — replace with real provider) ─────
+# ── Module-level LLM instance (lazy init) ──────────────────
 
-class MockLLM:
-    """Simulates LLM calls with deterministic outputs for the demo.
+_llm: Optional[DeepSeekLLM] = None
 
-    In production, replace with MAF's AI model integration or any provider.
-    """
 
-    @staticmethod
-    def chat(
-        system: str,
-        user: str,
-        simulate_tokens: int = 20,
-    ) -> tuple[str, int]:
-        """Return (response_text, tokens_consumed)."""
-        time.sleep(0.05)  # simulate latency
-        return f"[LLM response to: {user[:60]}...]", simulate_tokens
+def get_llm() -> DeepSeekLLM:
+    """Get or create the module-level DeepSeek LLM client."""
+    global _llm
+    if _llm is None:
+        _llm = DeepSeekLLM()
+        logger.info("DeepSeekLLM initialized: model=%s", _llm.model)
+    return _llm
 
-    @staticmethod
-    def summarize(log_text: str, simulate_tokens: int = 80) -> tuple[str, int]:
-        """Generate a summary from a log block."""
-        time.sleep(0.08)
-        lines = log_text.strip().split("\n")[:5]
-        summary = f"Today's activity: {len(lines)} log entries processed. " \
-                  f"Key items: {', '.join(line[:40] for line in lines if line.strip())}."
-        return summary, simulate_tokens
+
+def set_llm(llm: DeepSeekLLM) -> None:
+    """Inject a custom LLM instance (for testing or config)."""
+    global _llm
+    _llm = llm
 
 
 # ── Workflow Node Handlers ────────────────────────────────
@@ -58,7 +49,8 @@ def node_classify_intent(ctx: WorkflowContext) -> Artifact:
         event_type = "unknown"
         priority = 3
 
-    _, tokens = MockLLM.chat(
+    llm = get_llm()
+    _, tokens = llm.chat(
         system="You are a task classifier. Reply with one word: CODE, QA, DEPLOY, or CHAT.",
         user=f"Event type={event_type}, payload={ctx.task_input}",
     )
@@ -77,10 +69,11 @@ def node_handle_task(ctx: WorkflowContext) -> Artifact:
     intent = ctx.node_outputs.get("classify", Artifact()).data.get("intent", "unknown")
     event = ctx.task_input.get("event", {})
 
-    _, tokens = MockLLM.chat(
+    llm = get_llm()
+    _, tokens = llm.chat(
         system=f"You are a {intent} specialist. Process the task.",
         user=f"Task: {event}",
-        simulate_tokens=50,
+        max_tokens=512,
     )
 
     return Artifact(

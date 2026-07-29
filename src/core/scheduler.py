@@ -17,7 +17,7 @@ from typing import Any, Optional
 from src.core.types import AgentState, Artifact, Event, Journal, SessionContext
 from src.storage.ambient_buffer import AmbientBuffer
 from src.storage.journal_store import JournalStore
-from src.workflow.agent_workflow import MockLLM
+from src.workflow.agent_workflow import get_llm
 from src.workflow.engine import WorkflowEngine
 
 logger = logging.getLogger(__name__)
@@ -56,7 +56,6 @@ class ShiftScheduler:
         self.store = store
         self.persona_name = persona_name
         self.persona_role = persona_role
-        self.llm = MockLLM()
 
         # The agent's live session context
         self.session = SessionContext(agent_id=agent_id)
@@ -240,27 +239,33 @@ class ShiftScheduler:
             ]
             ambient_summary = "Ambient events (parked, not acted on):\n" + "\n".join(ambient_lines)
 
+        # Call LLM for journal generation
         prompt = (
-            f"Generate a structured end-of-shift journal in JSON format.\n\n"
-            f"Session trace:\n{session_trace[:1500]}\n\n"
+            f"请总结今天的工作，生成结构化日记。\n\n"
+            f"工作日志：\n{session_trace[:1500]}\n\n"
             f"{ambient_summary}\n\n"
-            f"Return a JSON object with keys: summary (1-3 sentences), "
-            f"key_decisions (list), pending_tasks (list), "
-            f"ambient_highlights (list of 1-3 notable low-priority items from ambient buffer)."
+            f"请用中文输出，包含：今日总结、关键决策、待办事项。"
         )
 
-        response, tokens = self.llm.summarize(prompt, simulate_tokens=60)
+        try:
+            response, tokens = get_llm().summarize(prompt)
+            llm_summary = response.strip()
+        except Exception as exc:
+            logger.warning("LLM journal generation failed: %s", exc)
+            llm_summary = ""
+            tokens = 0
 
-        # Parse the (mock) LLM response — in production, use structured output
-        # For the demo, we construct the journal directly from measured data
+        # Build journal: use LLM output if available, otherwise fall back to metrics
+        summary = llm_summary or (
+            f"Shift completed on {today}. Processed {len(self.session.history)} messages. "
+            f"{len(ambient_events)} ambient events parked (low relevance). "
+            f"All tasks completed successfully."
+        )
+
         return Journal(
             agent_id=self.agent_id,
             date=today,
-            summary=(
-                f"Shift completed on {today}. Processed {len(self.session.history)} messages. "
-                f"{len(ambient_events)} ambient events parked (low relevance). "
-                f"All tasks completed successfully."
-            ),
+            summary=summary,
             key_decisions=["Processed incoming work orders", "Maintained context isolation"],
             pending_tasks=[],
             ambient_highlights=[

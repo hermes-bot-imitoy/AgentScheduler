@@ -16,12 +16,18 @@ Run:
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 # Ensure src/ is on the path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+# ── API Key Configuration ────────────────────────────────────
+
+os.environ.setdefault("DEEPSEEK_API_KEY", "sk-f29a3265f9e34c3bbf8f86f9142a57c9")
+os.environ.setdefault("DEEPSEEK_MODEL", "deepseek-chat")
 
 from src.core.event_bus import EventBus
 from src.core.scheduler import ShiftScheduler
