@@ -125,9 +125,6 @@ class AgentRole:
         # Urgency bonus — stronger for per-role matching
         if "urgent" in event_text or "critical" in event_text or "紧急" in event_text:
             relevance += 0.15
-        # Priority bonus: HIGH/EMERGENCY events inherently more relevant
-        if event.priority >= Priority.HIGH:
-            relevance += 0.10
 
         relevance = min(1.0, relevance)
         # Blended score: 40% priority weight + 60% relevance weight.
