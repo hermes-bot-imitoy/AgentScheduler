@@ -94,7 +94,8 @@ def main():
     # ── Create roles with tools ──────────────────────────────
 
     ops_bot = AgentRole(
-        name="ops",
+        name="赵强",
+        role_id="ops",
         title="Site Reliability Engineer",
         personality="冷静果断，先止损再排查。擅长在压力下快速定位问题。",
         skills=["Kubernetes", "Prometheus", "PostgreSQL", "Linux"],
@@ -150,11 +151,11 @@ def main():
 
     def on_start(role: AgentRole, task: Task) -> None:
         urg = Urgency(-task.urgency)
-        print(f"\n  {BLUE}[{role.name}]{RESET} {YELLOW}▶ {urg.name}{RESET} — {task.description[:80]}")
+        print(f"\n  {BLUE}[{role.role_id}]{RESET} {YELLOW}▶ {urg.name}{RESET} — {task.description[:80]}")
 
     def on_done(role: AgentRole, task: Task) -> None:
         status_icon = f"{GREEN}✓{RESET}" if task.status == "done" else "\033[31m✗\033[0m"
-        print(f"  {BLUE}[{role.name}]{RESET} {status_icon} done ({task.tokens_consumed}t)")
+        print(f"  {BLUE}[{role.role_id}]{RESET} {status_icon} done ({task.tokens_consumed}t)")
         print(f"  {MAGENTA}→{RESET} {task.result[:300]}")
 
     ops_bot.on_task_start = on_start

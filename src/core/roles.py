@@ -70,7 +70,8 @@ class Task:
 class AgentRole:
     """A role definition with persona, LLM binding, and task queue."""
 
-    name: str                                              # e.g. "coder", "reviewer"
+    name: str                                              # person name, e.g. "张三", "李四"
+    role_id: str = ""                                      # functional role, e.g. "coder", "reviewer"
     title: str = ""                                        # e.g. "Senior Backend Engineer"
     personality: str = ""                                  # e.g. "严谨细致，追求代码质量"
     skills: list[str] = field(default_factory=list)        # e.g. ["Python", "Go", "K8s"]
@@ -167,7 +168,7 @@ class AgentRole:
     def build_system_prompt(self) -> str:
         """Construct the role's full system prompt from persona fields."""
         parts = [
-            f"你是 {self.name}，职位是 {self.title}。",
+            f"你是 {self.name}，职位是 {self.title}，负责 {self.role_id} 工作。",
             f"性格特点：{self.personality}。",
         ]
         if self.skills:
@@ -180,12 +181,12 @@ class AgentRole:
 
     def add_task(self, task: Task) -> None:
         """Add a task to this role's priority queue. Thread-safe."""
-        task.assigned_role = self.name
+        task.assigned_role = self.role_id
         with self._lock:
             heapq.heappush(self._queue, task)
             logger.info(
                 "[%s] Task queued: %s (urgency=%s, queue_depth=%d)",
-                self.name, task.task_id, Urgency(-task.urgency).name, len(self._queue),
+                self.role_id, task.task_id, Urgency(-task.urgency).name, len(self._queue),
             )
 
     def pop_task(self) -> Optional[Task]:
@@ -271,9 +272,9 @@ class AgentRole:
 
             task = Task(
                 urgency=urgency,
-                description=f"[FROM {self.name}] {message}",
-                source=f"talk:{self.name}",
-                context={"sender": self.name, "original_message": message},
+                description=f"[FROM {self.role_id}({self.name})] {message}",
+                source=f"talk:{self.role_id}",
+                context={"sender": self.role_id, "sender_name": self.name, "original_message": message},
             )
             target_role.add_task(task)
             return (
@@ -309,7 +310,7 @@ class AgentRole:
             },
             handler=talk_handler,
         )
-        logger.info("[%s] talk tool registered → %s", self.name, pool_ref.list_roles())
+        logger.info("[%s] talk tool registered → %s", self.role_id, pool_ref.list_roles())
 
     def talk_to(self, target: str, message: str, urgency: str = "NORMAL") -> str:
         """Programmatic inter-role communication (non-LLM path)."""
@@ -371,7 +372,7 @@ class AgentRole:
                 tool_result = result.content[0].text if result.content else str(result)
 
             logger.info("[%s] Tool call: %s(%s) → %s",
-                        self.name, tool_name, json.dumps(tool_args, ensure_ascii=False),
+                        self.role_id, tool_name, json.dumps(tool_args, ensure_ascii=False),
                         tool_result[:80])
 
             # Feed tool result back to LLM
@@ -379,7 +380,7 @@ class AgentRole:
             messages.append({"role": "user", "content": f"Tool result ({tool_name}):\n{tool_result}"})
 
         # Max rounds reached — return last response
-        logger.warning("[%s] Max tool-calling rounds reached for task %s", self.name, task.task_id)
+        logger.warning("[%s] Max tool-calling rounds reached for task %s", self.role_id, task.task_id)
         return messages[-1]["content"], total_tokens
 
     @staticmethod
@@ -438,9 +439,9 @@ class RolePool:
 
     def add_role(self, role: AgentRole) -> None:
         """Register a role. Must be called before start()."""
-        if role.name in self._roles:
-            raise ValueError(f"Role '{role.name}' already exists")
-        self._roles[role.name] = role
+        if role.role_id in self._roles:
+            raise ValueError(f"Role '{role.role_id}' already exists")
+        self._roles[role.role_id] = role
 
     def get_role(self, name: str) -> AgentRole:
         if name not in self._roles:
@@ -454,14 +455,14 @@ class RolePool:
 
     def start(self) -> None:
         """Launch all role worker threads."""
-        for name, role in self._roles.items():
+        for role_id, role in self._roles.items():
             role._running = True
             role._pool = self  # back-reference for talk tool
             role._llm = DeepSeekLLM(api_key=self._llm_api_key, model=self._llm_model)
             role._register_talk_tool()  # auto-register inter-role communication
             fut = self._executor.submit(self._role_loop, role)
-            self._futures[name] = fut
-            logger.info("Role '%s' worker started", name)
+            self._futures[role_id] = fut
+            logger.info("Role '%s' worker started", role_id)
 
     def shutdown(self, wait: bool = True) -> None:
         """Stop all role workers gracefully."""
@@ -496,7 +497,7 @@ class RolePool:
 
     def _role_loop(self, role: AgentRole) -> None:
         """Main loop for a single role's worker thread."""
-        logger.info("[%s] Worker loop started", role.name)
+        logger.info("[%s] Worker loop started", role.role_id)
 
         while role._running and not self._shutdown_flag.is_set():
             task = role.pop_task()
@@ -507,13 +508,13 @@ class RolePool:
             # Execute the task
             role._current_task = task
             task.status = "running"
-            logger.info("[%s] Processing task: %s (%s)", role.name, task.task_id, task.description[:60])
+            logger.info("[%s] Processing task: %s (%s)", role.role_id, task.task_id, task.description[:60])
 
             if role.on_task_start:
                 try:
                     role.on_task_start(role, task)
                 except Exception:
-                    logger.exception("[%s] on_task_start callback failed", role.name)
+                    logger.exception("[%s] on_task_start callback failed", role.role_id)
 
             try:
                 assert role._llm is not None, "LLM not initialized for role"
@@ -531,11 +532,11 @@ class RolePool:
                 task.tokens_consumed = tokens
                 task.status = "done"
                 logger.info("[%s] Task %s done (%d tokens): %s",
-                            role.name, task.task_id, tokens, result_text[:80])
+                            role.role_id, task.task_id, tokens, result_text[:80])
             except Exception as exc:
                 task.result = f"[ERROR] {exc}"
                 task.status = "failed"
-                logger.error("[%s] Task %s failed: %s", role.name, task.task_id, exc)
+                logger.error("[%s] Task %s failed: %s", role.role_id, task.task_id, exc)
 
             role._current_task = None
 
@@ -543,6 +544,6 @@ class RolePool:
                 try:
                     role.on_task_done(role, task)
                 except Exception:
-                    logger.exception("[%s] on_task_done callback failed", role.name)
+                    logger.exception("[%s] on_task_done callback failed", role.role_id)
 
-        logger.info("[%s] Worker loop exited", role.name)
+        logger.info("[%s] Worker loop exited", role.role_id)

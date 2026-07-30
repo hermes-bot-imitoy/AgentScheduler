@@ -58,7 +58,8 @@ def main():
 
     # ── Define Roles ────────────────────────────────────────
     coder = AgentRole(
-        name="coder",
+        name="李明",
+        role_id="coder",
         title="Senior Backend Engineer",
         personality="严谨细致，追求代码质量，善于排查复杂 bug",
         skills=["Python", "Go", "PostgreSQL", "Kubernetes", "Redis"],

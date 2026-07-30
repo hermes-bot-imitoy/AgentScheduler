@@ -1,11 +1,10 @@
 """Role Templates — 预定义角色模板.
 
 Provides ready-to-use AgentRole configurations for common team roles.
-Each template includes name, title, personality, skills, interest_keywords,
-and optional system_prompt_extra.
+Each template includes a person name (张三, 李四, etc.) and role_id (functional role).
 
 Usage:
-    from src.core.role_templates import architect, fullstack_dev, reviewer
+    from src.core.role_templates import architect, fullstack_dev
     pool.add_role(architect())
 """
 
@@ -20,7 +19,8 @@ from src.core.roles import AgentRole
 
 def architect() -> AgentRole:
     return AgentRole(
-        name="architect",
+        name="王建国",
+        role_id="architect",
         title="System Architect",
         personality=(
             "全局视野，善于权衡取舍，能用简洁语言解释复杂架构。"
@@ -45,7 +45,8 @@ def architect() -> AgentRole:
 
 def fullstack_dev() -> AgentRole:
     return AgentRole(
-        name="fullstack_dev",
+        name="李明",
+        role_id="fullstack_dev",
         title="Full-Stack Developer",
         personality=(
             "务实高效，追求代码简洁可维护。"
@@ -68,7 +69,8 @@ def fullstack_dev() -> AgentRole:
 
 def reviewer() -> AgentRole:
     return AgentRole(
-        name="reviewer",
+        name="张伟",
+        role_id="reviewer",
         title="Code Review & Security Lead",
         personality=(
             "目光敏锐，对安全和性能问题零容忍，但沟通方式温和。"
@@ -94,7 +96,8 @@ def reviewer() -> AgentRole:
 
 def qa_engineer() -> AgentRole:
     return AgentRole(
-        name="qa_engineer",
+        name="刘洋",
+        role_id="qa_engineer",
         title="QA Engineer",
         personality=(
             "细节控，擅长构造边界测试用例和异常场景。"
@@ -121,7 +124,8 @@ def qa_engineer() -> AgentRole:
 
 def ops_engineer() -> AgentRole:
     return AgentRole(
-        name="ops_engineer",
+        name="赵强",
+        role_id="ops_engineer",
         title="SRE / DevOps Engineer",
         personality=(
             "冷静果断，先止损再排查。"
@@ -149,7 +153,8 @@ def ops_engineer() -> AgentRole:
 
 def content_marketer() -> AgentRole:
     return AgentRole(
-        name="content_marketer",
+        name="陈静",
+        role_id="content_marketer",
         title="Content & Marketing Specialist",
         personality=(
             "创意丰富，擅长用简单语言讲复杂技术故事。"
@@ -171,7 +176,8 @@ def content_marketer() -> AgentRole:
 
 def data_analyst() -> AgentRole:
     return AgentRole(
-        name="data_analyst",
+        name="孙晓",
+        role_id="data_analyst",
         title="Data Analyst",
         personality=(
             "数据驱动，先看数据再给结论。"
@@ -199,7 +205,8 @@ def data_analyst() -> AgentRole:
 
 def support_agent() -> AgentRole:
     return AgentRole(
-        name="support_agent",
+        name="周梅",
+        role_id="support_agent",
         title="Customer Support Specialist",
         personality=(
             "耐心友善，以解决问题为导向。"
@@ -236,6 +243,33 @@ TEMPLATES: dict[str, "Callable[[], AgentRole]"] = {
     "support_agent": support_agent,
 }
 
+# Name pool for auto-generating person names
+_NAME_POOL: list[str] = [
+    "王建国", "李明", "张伟", "刘洋", "赵强", "陈静", "孙晓", "周梅",
+    "吴鑫", "郑丽", "钱峰", "冯涛", "蒋华", "沈芳", "韩磊", "杨雪",
+    "朱勇", "秦风", "许亮", "何颖", "吕刚", "施慧", "魏然", "苏杰",
+]
+_used_names: set[str] = set()
+_name_pool_initialized: bool = False
+
+
+def _next_name() -> str:
+    """Get next available name from the pool (or generate unique one)."""
+    global _used_names, _name_pool_initialized
+    if not _name_pool_initialized:
+        _name_pool_initialized = True
+        for _fn in TEMPLATES.values():
+            _used_names.add(_fn().name)
+    for n in _NAME_POOL:
+        if n not in _used_names:
+            _used_names.add(n)
+            return n
+    # Pool exhausted — generate
+    i = len(_used_names) + 1
+    name = f"员工{i:03d}"
+    _used_names.add(name)
+    return name
+
 
 def create_all_roles() -> list[AgentRole]:
     """Create one instance of every role template."""
@@ -247,3 +281,8 @@ def get_template(name: str) -> AgentRole:
     if name not in TEMPLATES:
         raise KeyError(f"Unknown template '{name}'. Available: {list(TEMPLATES)}")
     return TEMPLATES[name]()
+
+
+def add_template(role: AgentRole) -> None:
+    """Register a new role template into the pool."""
+    TEMPLATES[role.role_id] = lambda: role

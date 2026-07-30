@@ -47,7 +47,8 @@ def main():
 
     # ── Define Roles ────────────────────────────────────────
     coder = AgentRole(
-        name="coder",
+        name="李明",
+        role_id="coder",
         title="Senior Backend Engineer",
         personality="严谨细致，写完代码后主动找 reviewer 审查。遇到架构问题会咨询 architect。",
         skills=["Python", "Go", "PostgreSQL", "Kubernetes"],
@@ -55,7 +56,8 @@ def main():
     )
 
     reviewer = AgentRole(
-        name="reviewer",
+        name="张伟",
+        role_id="reviewer",
         title="Code Review Lead",
         personality="审查代码时发现架构隐患会立即通知 architect。对安全问题零容忍。",
         skills=["Code Review", "Security Audit"],
@@ -63,7 +65,8 @@ def main():
     )
 
     architect = AgentRole(
-        name="architect",
+        name="王建国",
+        role_id="architect",
         title="System Architect",
         personality="收到咨询后给出简洁方案。如果需要代码实现，会委托 coder 执行。",
         skills=["System Design", "Microservices", "DDD"],
