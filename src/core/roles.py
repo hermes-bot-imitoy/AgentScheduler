@@ -77,6 +77,7 @@ class AgentRole:
     personality: str = ""                                  # e.g. "严谨细致，追求代码质量"
     skills: list[str] = field(default_factory=list)        # e.g. ["Python", "Go", "K8s"]
     system_prompt_extra: str = ""                          # appended to base system prompt
+    is_default: bool = False                               # marked as a default/critical role
 
     # ── Event filter state (per-role) ─────────────────────
     state: AgentState = AgentState.ON_DUTY_IDLE            # role-specific lifecycle
