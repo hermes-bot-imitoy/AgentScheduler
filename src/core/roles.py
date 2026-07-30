@@ -13,7 +13,9 @@ incoming events/tasks to appropriate roles.
 from __future__ import annotations
 
 import heapq
+import json
 import logging
+import re
 import threading
 import time
 import uuid
@@ -85,6 +87,7 @@ class AgentRole:
     _current_task: Optional[Task] = field(default=None, repr=False, init=False)
     _running: bool = field(default=True, repr=False, init=False)
     _llm: Optional[DeepSeekLLM] = field(default=None, repr=False, init=False)
+    _tools: Any = field(default=None, repr=False, init=False)  # ToolRegistry, lazy init
 
     # Callbacks
     on_task_start: Optional[Callable[[AgentRole, Task], None]] = field(default=None, repr=False, init=False)
@@ -211,6 +214,121 @@ class AgentRole:
     def is_busy(self) -> bool:
         return self._current_task is not None
 
+    # ── MCP Tool Management ────────────────────────────────
+
+    def add_mcp_tool(
+        self,
+        name: str,
+        description: str,
+        input_schema: dict[str, Any],
+        handler: Callable[[dict[str, Any]], str],
+    ) -> None:
+        """Register an MCP-compatible tool for this role.
+
+        Tools are made available to the LLM during task execution.
+        The LLM can decide to call tools to gather information or perform actions.
+
+        Args:
+            name: Tool name (e.g. "read_logs", "query_db")
+            description: Human-readable description for the LLM
+            input_schema: JSON Schema dict for tool arguments
+            handler: Callable that executes the tool, returns result string
+        """
+        from src.core.tools import ToolRegistry
+
+        if self._tools is None:
+            self._tools = ToolRegistry()
+        self._tools.add_tool(name, description, input_schema, handler)
+
+    @property
+    def mcp_tool_names(self) -> list[str]:
+        if self._tools is None:
+            return []
+        return self._tools.tool_names
+
+    # ── Tool-calling LLM execution ─────────────────────────
+
+    def _execute_with_tools(self, task: Task) -> tuple[str, int]:
+        """Execute a task with tool-calling loop.
+
+        1. Send system prompt + tools + task to LLM
+        2. If LLM responds with a tool_call, execute tool and feed result back
+        3. Loop until LLM gives final response (no tool_call)
+        4. Return (final_text, total_tokens)
+        """
+        assert self._llm is not None
+
+        system = self.build_system_prompt()
+        tools_prompt = ""
+        if self._tools is not None:
+            tools_prompt = self._tools.get_tools_prompt()
+
+        full_system = system
+        if tools_prompt:
+            full_system += "\n\n" + tools_prompt
+
+        messages: list[dict[str, str]] = [
+            {"role": "system", "content": full_system},
+            {"role": "user", "content": task.description},
+        ]
+
+        total_tokens = 0
+        max_rounds = 5  # prevent infinite loops
+
+        for _round in range(max_rounds):
+            # Build conversation for this round
+            msgs_for_api = [{"role": m["role"], "content": m["content"]} for m in messages]
+
+            response_text, usage = self._llm._call_api(msgs_for_api, 0.7, 512)
+            round_tokens = usage.get("total_tokens", 0) if usage else 0
+            total_tokens += round_tokens
+
+            # Check for tool_call
+            tool_name, tool_args = self._parse_tool_call(response_text)
+
+            if tool_name is None:
+                # Final response — no tool call
+                return response_text, total_tokens
+
+            # Execute tool
+            if self._tools is None:
+                tool_result = f"Error: no tools available (tool '{tool_name}' not found)"
+            else:
+                result = self._tools.call_tool(tool_name, tool_args)
+                tool_result = result.content[0].text if result.content else str(result)
+
+            logger.info("[%s] Tool call: %s(%s) → %s",
+                        self.name, tool_name, json.dumps(tool_args, ensure_ascii=False),
+                        tool_result[:80])
+
+            # Feed tool result back to LLM
+            messages.append({"role": "assistant", "content": response_text})
+            messages.append({"role": "user", "content": f"Tool result ({tool_name}):\n{tool_result}"})
+
+        # Max rounds reached — return last response
+        logger.warning("[%s] Max tool-calling rounds reached for task %s", self.name, task.task_id)
+        return messages[-1]["content"], total_tokens
+
+    @staticmethod
+    def _parse_tool_call(response: str) -> tuple[Optional[str], dict[str, Any]]:
+        """Extract tool_call from LLM response.
+
+        Supports format:
+          ```tool_call
+          {"tool": "name", "arguments": {...}}
+          ```
+        """
+        # Match ```tool_call ... ``` block
+        match = re.search(r'```tool_call\s*\n(.*?)\n\s*```', response, re.DOTALL)
+        if not match:
+            return None, {}
+
+        try:
+            data = json.loads(match.group(1).strip())
+            return data.get("tool"), data.get("arguments", {})
+        except json.JSONDecodeError:
+            return None, {}
+
 
 # ── RolePool ───────────────────────────────────────────────
 
@@ -324,11 +442,16 @@ class RolePool:
 
             try:
                 assert role._llm is not None, "LLM not initialized for role"
-                result_text, tokens = role._llm.chat(
-                    system=role.build_system_prompt(),
-                    user=task.description,
-                    max_tokens=512,
-                )
+                if role._tools is not None and role._tools.tool_count > 0:
+                    # Tool-calling loop: LLM can invoke MCP tools
+                    result_text, tokens = role._execute_with_tools(task)
+                else:
+                    # Simple chat: no tools available
+                    result_text, tokens = role._llm.chat(
+                        system=role.build_system_prompt(),
+                        user=task.description,
+                        max_tokens=512,
+                    )
                 task.result = result_text
                 task.tokens_consumed = tokens
                 task.status = "done"
