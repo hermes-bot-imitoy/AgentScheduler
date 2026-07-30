@@ -62,6 +62,7 @@ def main():
         title="Senior Backend Engineer",
         personality="严谨细致，追求代码质量，善于排查复杂 bug",
         skills=["Python", "Go", "PostgreSQL", "Kubernetes", "Redis"],
+        interest_keywords={"bug", "fix", "crash", "500", "error", "debug", "race", "down"},
     )
 
     reviewer = AgentRole(
@@ -70,6 +71,7 @@ def main():
         personality="目光敏锐，对安全和性能问题零容忍，但沟通方式温和",
         skills=["Code Review", "Security Audit", "Performance Profiling"],
         system_prompt_extra="每次审查代码时，必须指出至少一个潜在风险点。",
+        interest_keywords={"pr", "review", "security", "vuln", "audit", "code"},
     )
 
     architect = AgentRole(
@@ -78,6 +80,7 @@ def main():
         personality="全局视野，善于权衡取舍，能用简洁语言解释复杂架构",
         skills=["System Design", "Microservices", "DDD", "Event Sourcing"],
         system_prompt_extra="回答必须简洁，不超过3句话。先给结论再给理由。",
+        interest_keywords={"migration", "architecture", "design", "scale", "refactor", "拆分", "迁移"},
     )
 
     # ── Start Pool ──────────────────────────────────────────
@@ -190,6 +193,76 @@ def main():
         description="Evaluate migration of monolith billing module to separate service. Estimate effort and risks.",
     ))
 
+    time.sleep(10)
+
+    # ════════════════════════════════════════════════════════════
+    #  Scenario 4: Event Dispatcher — fan-out to all roles
+    # ════════════════════════════════════════════════════════════
+    header("Scenario 4: Event Dispatcher — Fan-out with Per-Role Filtering")
+
+    from src.core.dispatcher import EventDispatcher
+    from src.core.types import Event as BusEvent, Priority
+
+    dispatcher = EventDispatcher(pool)
+
+    # Event 1: Security vulnerability — only reviewer should care
+    print(f"  {YELLOW}Event 1: GitHub security advisory (HIGH){RESET}")
+    sec_event = BusEvent(
+        source="github",
+        event_type="security_advisory",
+        priority=Priority.HIGH,
+        payload={"title": "CVE-2026-1234: SQL injection in login endpoint", "severity": "critical"},
+    )
+    results = dispatcher.trigger(sec_event)
+    for role_name, r in results.items():
+        icon = f"{GREEN}PASS{RESET}" if r["accepted"] else f"{YELLOW}SKIP{RESET}"
+        print(f"    {icon} {role_name}: {r['reason']}")
+
+    # Event 2: Production crash — coder should accept, reviewer might too
+    print(f"\n  {YELLOW}Event 2: Production crash alert (EMERGENCY){RESET}")
+    crash_event = BusEvent(
+        source="monitoring",
+        event_type="crash_alert",
+        priority=Priority.EMERGENCY,
+        payload={"title": "All pods down — OOM killer triggered on worker nodes", "urgent": True},
+    )
+    results = dispatcher.trigger(crash_event)
+    for role_name, r in results.items():
+        icon = f"{GREEN}PASS{RESET}" if r["accepted"] else f"{YELLOW}SKIP{RESET}"
+        print(f"    {icon} {role_name}: {r['reason']}")
+
+    # Event 3: Architecture proposal — only architect should care
+    print(f"\n  {YELLOW}Event 3: Architecture migration proposal (NORMAL){RESET}")
+    arch_event = BusEvent(
+        source="confluence",
+        event_type="proposal",
+        priority=Priority.NORMAL,
+        payload={"title": "迁移单体计费模块到微服务架构的设计方案", "author": "alice"},
+    )
+    results = dispatcher.trigger(arch_event)
+    for role_name, r in results.items():
+        icon = f"{GREEN}PASS{RESET}" if r["accepted"] else f"{YELLOW}SKIP{RESET}"
+        print(f"    {icon} {role_name}: {r['reason']}")
+
+    # Event 4: Low-priority spam — no one should care
+    print(f"\n  {YELLOW}Event 4: Random Slack message (LOW){RESET}")
+    spam_event = BusEvent(
+        source="slack",
+        event_type="channel_message",
+        priority=Priority.LOW,
+        payload={"text": "Anyone up for lunch?", "channel": "#random"},
+    )
+    results = dispatcher.trigger(spam_event)
+    for role_name, r in results.items():
+        icon = f"{GREEN}PASS{RESET}" if r["accepted"] else f"{YELLOW}SKIP{RESET}"
+        print(f"    {icon} {role_name}: {r['reason']}")
+
+    # Stats
+    ds = dispatcher.get_stats()
+    print(f"\n  {MAGENTA}Dispatcher stats:{RESET} {ds['total_events']} events → "
+          f"{ds['total_tasks_created']} tasks across {ds['roles_activated']} role-activations")
+
+    # Wait for queued tasks to complete
     time.sleep(10)
 
     # ── Final Status ────────────────────────────────────────

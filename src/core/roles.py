@@ -23,6 +23,7 @@ from enum import IntEnum
 from typing import Any, Callable, Optional
 
 from src.core.llm import DeepSeekLLM
+from src.core.types import AgentState, Event, Priority
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,11 @@ class AgentRole:
     skills: list[str] = field(default_factory=list)        # e.g. ["Python", "Go", "K8s"]
     system_prompt_extra: str = ""                          # appended to base system prompt
 
+    # ── Event filter state (per-role) ─────────────────────
+    state: AgentState = AgentState.ON_DUTY_IDLE            # role-specific lifecycle
+    salience_threshold: float = 0.4                        # per-role override
+    interest_keywords: set[str] = field(default_factory=set)  # keywords this role cares about
+
     # Internal state (managed by RolePool)
     _queue: list[Task] = field(default_factory=list, repr=False, init=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, init=False)
@@ -83,6 +89,79 @@ class AgentRole:
     # Callbacks
     on_task_start: Optional[Callable[[AgentRole, Task], None]] = field(default=None, repr=False, init=False)
     on_task_done: Optional[Callable[[AgentRole, Task], None]] = field(default=None, repr=False, init=False)
+
+    # ── Event Filter (per-role Layer 1-3) ──────────────────
+
+    def evaluate_event(self, event: Event) -> tuple[bool, str]:
+        """Run per-role 3-layer filter on an event.
+
+        Returns (should_process, reason).
+        Layer 1: state mask (OFF_DUTY blocks non-EMERGENCY)
+        Layer 2: salience = (priority/EMERGENCY) * keyword_relevance
+        Layer 3: PASS if score >= threshold
+        """
+        # Layer 1: State Mask
+        if self.state in (AgentState.OFF_DUTY, AgentState.WRAPPING_UP):
+            if event.priority < Priority.EMERGENCY:
+                return False, f"Role {self.name} is {self.state.value}"
+
+        # Layer 2: Salience — keyword-based relevance per role
+        relevance = 0.25  # base
+        payload_text = str(event.payload).lower()
+        event_text = f"{event.event_type.lower()} {payload_text}"
+
+        if self.interest_keywords:
+            hits = sum(1 for kw in self.interest_keywords if kw in event_text)
+            # Boost: each hit adds 0.25, not 0.15 (since per-role keywords are narrow)
+            relevance += min(0.60, 0.25 * hits)
+
+        # Bonus for matching skills (partial match)
+        skill_text = " ".join(self.skills).lower()
+        for word in event_text.split():
+            if word in skill_text:
+                relevance += 0.10
+                break
+
+        # Urgency bonus — stronger for per-role matching
+        if "urgent" in event_text or "critical" in event_text or "紧急" in event_text:
+            relevance += 0.15
+        # Priority bonus: HIGH/EMERGENCY events inherently more relevant
+        if event.priority >= Priority.HIGH:
+            relevance += 0.10
+
+        relevance = min(1.0, relevance)
+        # Blended score: 40% priority weight + 60% relevance weight.
+        # This lets NORMAL-priority events pass when relevance is high,
+        # while keeping LOW-priority spam below threshold.
+        score = event.priority.value / 10.0 * 0.4 + relevance * 0.6
+
+        if score < self.salience_threshold:
+            return False, f"Salience {score:.2f} < threshold {self.salience_threshold} (relevance={relevance:.2f})"
+
+        # Layer 3: PASS
+        return True, f"PASS (score={score:.2f}, relevance={relevance:.2f})"
+
+    def event_to_task(self, event: Event) -> Task:
+        """Convert a passed Event into a Task for this role's queue."""
+        # Map Priority → Urgency
+        urgency_map = {
+            Priority.LOW: Urgency.LOW,
+            Priority.NORMAL: Urgency.NORMAL,
+            Priority.HIGH: Urgency.HIGH,
+            Priority.EMERGENCY: Urgency.CRITICAL,
+        }
+        urgency = urgency_map.get(event.priority, Urgency.NORMAL)
+
+        description = f"[{event.source}/{event.event_type}] {event.payload.get('title', str(event.payload)[:100])}"
+
+        return Task(
+            urgency=urgency,
+            description=description,
+            source=event.source,
+            context={"event_id": event.id, "payload": event.payload},
+        )
+
+    # ── Persona ────────────────────────────────────────────
 
     def build_system_prompt(self) -> str:
         """Construct the role's full system prompt from persona fields."""
