@@ -73,6 +73,7 @@ class AgentRole:
     name: str                                              # person name, e.g. "张三", "李四"
     role_id: str = ""                                      # functional role, e.g. "coder", "reviewer"
     title: str = ""                                        # e.g. "Senior Backend Engineer"
+    responsibilities: str = ""                             # e.g. "编写代码，修复Bug，实现新功能"
     personality: str = ""                                  # e.g. "严谨细致，追求代码质量"
     skills: list[str] = field(default_factory=list)        # e.g. ["Python", "Go", "K8s"]
     system_prompt_extra: str = ""                          # appended to base system prompt
@@ -259,6 +260,16 @@ class AgentRole:
 
         pool_ref = self._pool  # capture for closure
 
+        # Build rich team roster for the LLM
+        roster_lines: list[str] = []
+        for rid, r in pool_ref._roles.items():
+            resp = r.responsibilities or r.title
+            roster_lines.append(
+                f"  - **{r.name}** (role_id: `{rid}`) — {resp}"
+                f"  Skills: {', '.join(r.skills[:4])}"
+            )
+        team_roster = "\n".join(roster_lines)
+
         def talk_handler(args: dict[str, Any]) -> str:
             target = args.get("target", "")
             message = args.get("message", "")
@@ -278,32 +289,36 @@ class AgentRole:
             )
             target_role.add_task(task)
             return (
-                f"Message sent to '{target}' (urgency={urgency.name}). "
+                f"Message sent to {target_role.name} ({target}) (urgency={urgency.name}). "
                 f"Their queue now has {target_role.queue_depth} task(s)."
             )
 
         self.add_mcp_tool(
             name="talk",
             description=(
-                "Send a message/task to another role. "
-                "Use this to ask questions, delegate work, or request reviews. "
-                f"Available targets: {', '.join(pool_ref.list_roles())}"
+                "Send a message or delegate a task to a teammate. "
+                "Choose the right person based on their responsibilities.\n\n"
+                f"**Team Roster:**\n{team_roster}\n\n"
+                "Use the `role_id` as the `target` parameter."
             ),
             input_schema={
                 "type": "object",
                 "properties": {
                     "target": {
                         "type": "string",
-                        "description": f"Target role name. One of: {', '.join(pool_ref.list_roles())}",
+                        "description": (
+                            "Target person's role_id. "
+                            f"Available: {', '.join(pool_ref.list_roles())}"
+                        ),
                     },
                     "message": {
                         "type": "string",
-                        "description": "The message or task description to send",
+                        "description": "The message or task to delegate. Be specific about what you need.",
                     },
                     "urgency": {
                         "type": "string",
                         "enum": ["LOW", "NORMAL", "HIGH", "CRITICAL"],
-                        "description": "Urgency level for the target's queue",
+                        "description": "How urgent is this? CRITICAL for production incidents.",
                     },
                 },
                 "required": ["target", "message"],

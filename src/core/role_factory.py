@@ -36,6 +36,7 @@ _CREATE_ROLE_PROMPT = """你是一个 HR 专员，需要根据用人需求创建
 {{
     "role_id": "英文小写下划线，如 rust_engineer",
     "title": "职位名称",
+    "responsibilities": "职责描述（中文，一句话概括主要工作内容）",
     "personality": "性格特点（中文，2-3句）",
     "skills": ["技能1", "技能2", ...],
     "interest_keywords": ["关键词1", "关键词2", ...],
@@ -111,7 +112,7 @@ class RoleFactory:
             raise ValueError(f"Failed to parse role config from LLM response: {response_text[:200]}")
 
         # Validate required fields
-        required = ["role_id", "title", "personality", "skills", "interest_keywords"]
+        required = ["role_id", "title", "responsibilities", "personality", "skills", "interest_keywords"]
         for field in required:
             if field not in role_config:
                 raise ValueError(f"Missing required field '{field}' in role config")
@@ -128,6 +129,7 @@ class RoleFactory:
             name=person_name,
             role_id=generated_role_id,
             title=role_config["title"],
+            responsibilities=role_config.get("responsibilities", ""),
             personality=role_config["personality"],
             skills=role_config["skills"],
             interest_keywords=set(role_config["interest_keywords"]),
