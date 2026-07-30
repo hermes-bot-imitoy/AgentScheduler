@@ -88,6 +88,7 @@ class AgentRole:
     _running: bool = field(default=True, repr=False, init=False)
     _llm: Optional[DeepSeekLLM] = field(default=None, repr=False, init=False)
     _tools: Any = field(default=None, repr=False, init=False)  # ToolRegistry, lazy init
+    _pool: Any = field(default=None, repr=False, init=False)   # RolePool back-reference for talk
 
     # Callbacks
     on_task_start: Optional[Callable[[AgentRole, Task], None]] = field(default=None, repr=False, init=False)
@@ -246,6 +247,78 @@ class AgentRole:
             return []
         return self._tools.tool_names
 
+    # ── Inter-role Communication (talk) ────────────────────
+
+    def _register_talk_tool(self) -> None:
+        """Auto-register the 'talk' tool for inter-role communication."""
+        if self._pool is None:
+            return
+        if "talk" in self.mcp_tool_names:
+            return  # already registered
+
+        pool_ref = self._pool  # capture for closure
+
+        def talk_handler(args: dict[str, Any]) -> str:
+            target = args.get("target", "")
+            message = args.get("message", "")
+            urgency_str = args.get("urgency", "NORMAL")
+
+            if not target or not message:
+                return "Error: 'target' and 'message' are required."
+
+            target_role = pool_ref.get_role(target)
+            urgency = getattr(Urgency, urgency_str.upper(), Urgency.NORMAL)
+
+            task = Task(
+                urgency=urgency,
+                description=f"[FROM {self.name}] {message}",
+                source=f"talk:{self.name}",
+                context={"sender": self.name, "original_message": message},
+            )
+            target_role.add_task(task)
+            return (
+                f"Message sent to '{target}' (urgency={urgency.name}). "
+                f"Their queue now has {target_role.queue_depth} task(s)."
+            )
+
+        self.add_mcp_tool(
+            name="talk",
+            description=(
+                "Send a message/task to another role. "
+                "Use this to ask questions, delegate work, or request reviews. "
+                f"Available targets: {', '.join(pool_ref.list_roles())}"
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": f"Target role name. One of: {', '.join(pool_ref.list_roles())}",
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "The message or task description to send",
+                    },
+                    "urgency": {
+                        "type": "string",
+                        "enum": ["LOW", "NORMAL", "HIGH", "CRITICAL"],
+                        "description": "Urgency level for the target's queue",
+                    },
+                },
+                "required": ["target", "message"],
+            },
+            handler=talk_handler,
+        )
+        logger.info("[%s] talk tool registered → %s", self.name, pool_ref.list_roles())
+
+    def talk_to(self, target: str, message: str, urgency: str = "NORMAL") -> str:
+        """Programmatic inter-role communication (non-LLM path)."""
+        return self._tools.call_tool("talk", {
+            "target": target,
+            "message": message,
+            "urgency": urgency,
+        }).content[0].text
+
     # ── Tool-calling LLM execution ─────────────────────────
 
     def _execute_with_tools(self, task: Task) -> tuple[str, int]:
@@ -383,7 +456,9 @@ class RolePool:
         """Launch all role worker threads."""
         for name, role in self._roles.items():
             role._running = True
+            role._pool = self  # back-reference for talk tool
             role._llm = DeepSeekLLM(api_key=self._llm_api_key, model=self._llm_model)
+            role._register_talk_tool()  # auto-register inter-role communication
             fut = self._executor.submit(self._role_loop, role)
             self._futures[name] = fut
             logger.info("Role '%s' worker started", name)
