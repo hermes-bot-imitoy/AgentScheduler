@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash")
-DEEPSEEK_THINKING = os.environ.get("DEEPSEEK_THINKING", "").lower() in ("1", "true", "yes", "on")
+DEEPSEEK_THINKING = os.environ.get("DEEPSEEK_THINKING", "true").lower() in ("1", "true", "yes", "on")
 
 DEFAULT_MAX_TOKENS = 512
 DEFAULT_TEMPERATURE = 0.7
