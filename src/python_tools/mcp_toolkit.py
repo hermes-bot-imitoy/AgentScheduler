@@ -1,15 +1,16 @@
 """MCP 工具加载器 (MCP Tool Loader).
 
-负责:
-  1. 连接配置文件中定义的所有 MCP 服务器
-  2. 加载每个服务器暴露的工具
-  3. 根据分组规则 (mcp_group_rules.json) 将工具分组成多个 ToolKit
-  4. 角色可以一次导入某个分组的 ToolKit
+设计说明:
+  - 不负责安装任何 MCP 服务器. 用户通过 npx 自行准备 (如: npx -y @modelcontextprotocol/server-github)
+  - 配置文件 (mcp_group_rules.json) 只声明 npx 包名, 不写启动命令
+  - 加载器自动构造 `npx -y <包名>` 命令, 通过 MCP Python SDK 的
+    stdio_client + ClientSession.list_tools() 获取服务器暴露的工具列表
+  - 按分组规则将工具分组为多个 ToolKit, 角色可一次导入某组
 
 用法:
     from src.python_tools.mcp_toolkit import load_mcp_toolkits
-    toolkits = load_mcp_toolkits()          # 返回 {组名: ToolKit}
-    role.add_toolkit(toolkits["file_ops"])  # 角色导入文件操作工具组
+    toolkits = load_mcp_toolkits()          # {组名: ToolKit}
+    role.add_toolkit(toolkits["file_ops"])
 """
 
 from __future__ import annotations
@@ -37,7 +38,7 @@ def load_rules(rules_file: str | Path | None = None) -> dict[str, Any]:
         rules_file: 规则文件路径 (默认: src/config/mcp_group_rules.json).
 
     返回:
-        规则字典: {"servers": [...], "groups": [...], "default_group": "..."}
+        规则字典: {"servers": ["npx包名", ...], "groups": [...], "default_group": "..."}
     """
     path = Path(rules_file) if rules_file else RULES_FILE
     if not path.exists():
@@ -47,39 +48,40 @@ def load_rules(rules_file: str | Path | None = None) -> dict[str, Any]:
 
 
 # ═══════════════════════════════════════════════════════════
-#  MCP 服务器连接管理
+#  MCP 服务器连接管理 (npx 启动 + stdio 会话)
 # ═══════════════════════════════════════════════════════════
 
 class MCPServer:
     """单个 MCP 服务器连接.
 
-    在后台线程中维护一个事件循环, 保持 session 存活,
+    通过 npx 启动服务器进程, 在后台线程事件循环中保持 ClientSession 存活,
     工具调用通过 run_coroutine_threadsafe 提交到该循环执行.
+
+    参数:
+        package: npx 包名 (如 "@modelcontextprotocol/server-github")
+        args:    附加命令行参数 (可选, 如 filesystem 的授权目录)
     """
 
-    def __init__(self, name: str, command: str, args: list[str],
-                 env: dict[str, str] | None = None, description: str = ""):
-        self.name = name
-        self.command = command
-        self.args = args
-        self.env = env or {}
-        self.description = description
+    def __init__(self, package: str, args: list[str] | None = None):
+        self.package = package
+        self.args = args or []
 
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
         self._session: Any = None
         self._ready = threading.Event()
+        self._connect_error: Optional[str] = None
 
     # ── 生命周期 ──────────────────────────────────────────
 
     def connect(self) -> None:
-        """启动后台线程连接服务器."""
+        """启动后台线程, 用 npx 拉起服务器并建立会话."""
         self._thread = threading.Thread(
-            target=self._run_loop, name=f"mcp-{self.name}", daemon=True,
+            target=self._run_loop, name=f"mcp-{self.package}", daemon=True,
         )
         self._thread.start()
-        # 等待连接就绪 (最多 15 秒)
-        self._ready.wait(15)
+        # 等待连接就绪 (最多 20 秒, npx 首次拉包可能较慢)
+        self._ready.wait(20)
 
     def _run_loop(self) -> None:
         """后台线程入口: 运行事件循环, 建立 session."""
@@ -90,10 +92,10 @@ class MCPServer:
             asyncio.set_event_loop(self._loop)
 
             async def _connect():
+                # 自动构造 npx 启动命令: npx -y <包名> [args...]
                 server_params = StdioServerParameters(
-                    command=self.command,
-                    args=self.args,
-                    env=self.env or None,
+                    command="npx",
+                    args=["-y", self.package, *self.args],
                 )
                 async with stdio_client(server_params) as (read, write):
                     from mcp import ClientSession
@@ -101,13 +103,14 @@ class MCPServer:
                         await session.initialize()
                         self._session = session
                         self._ready.set()
-                        logger.info("MCP server '%s' connected (%s)", self.name, self.command)
+                        logger.info("MCP 服务器 '%s' 连接成功 (npx -y %s)", self.package, self.package)
                         # 保持连接, 循环永远运行
                         await asyncio.Event().wait()
 
             self._loop.run_until_complete(_connect())
         except Exception as exc:
-            logger.error("MCP server '%s' connect failed: %s", self.name, exc)
+            self._connect_error = str(exc)
+            logger.error("MCP 服务器 '%s' 连接失败: %s", self.package, exc)
             self._ready.set()  # 即使失败也唤醒, 避免卡死
 
     def close(self) -> None:
@@ -120,7 +123,7 @@ class MCPServer:
     # ── 工具操作 ──────────────────────────────────────────
 
     def list_tools(self) -> list[Any]:
-        """列出服务器暴露的所有工具."""
+        """通过 SDK 的 ClientSession.list_tools() 获取服务器工具列表."""
         if self._session is None or self._loop is None:
             return []
         try:
@@ -130,13 +133,13 @@ class MCPServer:
             result = future.result(timeout=10)
             return list(result.tools)
         except Exception as exc:
-            logger.error("MCP '%s' list_tools failed: %s", self.name, exc)
+            logger.error("MCP '%s' list_tools 失败: %s", self.package, exc)
             return []
 
     def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
         """调用服务器上的工具. 返回结果文本."""
         if self._session is None or self._loop is None:
-            return f"错误: MCP 服务器 '{self.name}' 未连接"
+            return f"错误: MCP 服务器 '{self.package}' 未连接"
         try:
             future = asyncio.run_coroutine_threadsafe(
                 self._session.call_tool(name, arguments), self._loop,
@@ -154,7 +157,7 @@ class MCPServer:
                 return f"[MCP 错误] {''.join(parts)}"
             return "\n".join(parts) if parts else str(result)
         except Exception as exc:
-            logger.error("MCP '%s' call %s failed: %s", self.name, name, exc)
+            logger.error("MCP '%s' 调用 %s 失败: %s", self.package, name, exc)
             return f"错误: 调用 {name} 失败 - {exc}"
 
 
@@ -163,7 +166,7 @@ class MCPServer:
 # ═══════════════════════════════════════════════════════════
 
 def _match_group(tool_name: str, patterns: list[str]) -> bool:
-    """判断工具名是否匹配分组规则 (支持通配符)."""
+    """判断工具名是否匹配分组规则 (支持通配符 *)."""
     for pat in patterns:
         if fnmatch.fnmatch(tool_name, pat):
             return True
@@ -171,64 +174,62 @@ def _match_group(tool_name: str, patterns: list[str]) -> bool:
 
 
 class MCPToolLoader:
-    """MCP 工具加载器: 连接所有服务器, 按规则分组.
+    """MCP 工具加载器: npx 启动所有配置的服务器, 按规则分组.
 
     参数:
-        rules_file: 分组规则 JSON 路径.
+        rules_file: 分组规则 JSON 路径 (可选).
+        server_args: 每个服务器的附加参数, 如 {"@modelcontextprotocol/server-filesystem": ["/tmp"]}
 
     用法:
-        loader = MCPToolLoader()
+        loader = MCPToolLoader(server_args={".../server-filesystem": ["/tmp"]})
         toolkits = loader.load()          # {组名: ToolKit}
         loader.close()                     # 关闭所有服务器连接
     """
 
-    def __init__(self, rules_file: str | Path | None = None):
+    def __init__(self, rules_file: str | Path | None = None,
+                 server_args: dict[str, list[str]] | None = None):
         self.rules = load_rules(rules_file)
         self.default_group = self.rules.get("default_group", "default")
-        self._servers: dict[str, MCPServer] = {}
-        self._tool_owner: dict[str, str] = {}   # 工具名 -> 服务器名
+        self.server_args = server_args or {}
+        self._servers: dict[str, MCPServer] = {}   # 包名 -> 连接
+        self._tool_owner: dict[str, str] = {}      # 工具名 -> 包名
         self._loaded = False
-        self._result: dict[str, ToolKit] = {}   # 缓存上次加载结果
+        self._result: dict[str, ToolKit] = {}      # 缓存上次加载结果
 
     # ── 加载流程 ──────────────────────────────────────────
 
     def load(self) -> dict[str, ToolKit]:
-        """加载所有 MCP 工具并分组.
+        """加载所有配置的 MCP 服务器工具并分组.
 
         返回:
-            {组名: ToolKit} 字典. 每个 ToolKit 包含该组匹配到的所有 MCP 工具.
+            {组名: ToolKit} 字典. 每个 ToolKit 包含该组匹配到的所有工具.
         """
         if self._loaded:
-            # 返回上次加载结果 (避免重复连接)
             return self._result
 
-        # 1. 连接所有配置的服务器
-        for server_cfg in self.rules.get("servers", []):
-            name = server_cfg["name"]
-            server = MCPServer(
-                name=name,
-                command=server_cfg["command"],
-                args=server_cfg.get("args", []),
-                env=server_cfg.get("env"),
-                description=server_cfg.get("description", ""),
-            )
+        # 1. 连接所有配置的服务器 (自动构造 npx -y <包名>)
+        for package in self.rules.get("servers", []):
+            if not package or not isinstance(package, str):
+                logger.warning("跳过无效服务器配置: %r", package)
+                continue
+            server = MCPServer(package=package, args=self.server_args.get(package, []))
             server.connect()
-            self._servers[name] = server
+            self._servers[package] = server
 
-        # 2. 收集所有工具
+        # 2. 通过 SDK 获取每个服务器的工具列表
         all_tools: dict[str, Any] = {}
-        for sname, server in self._servers.items():
+        for package, server in self._servers.items():
             for tool in server.list_tools():
                 tname = getattr(tool, "name", "")
                 if not tname:
                     continue
                 if tname in all_tools:
-                    logger.warning("工具名冲突: '%s' 来自服务器 '%s' 和 '%s', 保留第一个",
-                                   tname, self._tool_owner.get(tname), sname)
+                    logger.warning("工具名冲突: '%s' 来自 '%s' 和 '%s', 保留第一个",
+                                   tname, self._tool_owner.get(tname), package)
                     continue
                 all_tools[tname] = tool
-                self._tool_owner[tname] = sname
-                logger.info("MCP 加载工具: %s (来自 %s)", tname, sname)
+                self._tool_owner[tname] = package
+                logger.info("MCP 工具加载: %s (来自 %s)", tname, package)
 
         self._loaded = True
         self._result = self._build_toolkits(all_tools)
@@ -237,7 +238,6 @@ class MCPToolLoader:
     def _build_toolkits(self, all_tools: dict[str, Any]) -> dict[str, ToolKit]:
         """将工具按分组规则分配到各个 ToolKit."""
         groups = self.rules.get("groups", [])
-        # 创建每个组的 ToolKit
         toolkits: dict[str, ToolKit] = {}
         group_tools: dict[str, dict[str, Any]] = {}
 
@@ -246,15 +246,14 @@ class MCPToolLoader:
             toolkits[gname] = ToolKit(name=gname, description=g.get("description", ""))
             group_tools[gname] = {}
 
-        # 分配工具到组
-        default_tk = toolkits.get(self.default_group)
         default_gt = group_tools.get(self.default_group, {})
 
+        # 分配工具到组 (default 组最后兜底)
         for tname, tool in all_tools.items():
             assigned = False
             for g in groups:
                 if g["name"] == self.default_group:
-                    continue  # default 组最后兜底
+                    continue
                 if _match_group(tname, g.get("match", [])):
                     group_tools[g["name"]][tname] = tool
                     assigned = True
@@ -281,7 +280,7 @@ class MCPToolLoader:
                     description=getattr(tool, "description", "") or "",
                     input_schema=getattr(tool, "input_schema", {}) or {},
                     handler=_make_handler(),
-                    source=f"mcp:{server.name}",
+                    source=f"mcp:{server.package}",
                     mcp_tool=tool,
                 )
                 toolkits[gname]._tools[tname] = td
@@ -291,10 +290,10 @@ class MCPToolLoader:
     # ── 查询 ──────────────────────────────────────────────
 
     def list_loaded_tools(self) -> list[dict[str, str]]:
-        """列出所有已加载工具及其来源服务器."""
+        """列出所有已加载工具及其来源服务器包名."""
         result = []
-        for tname, sname in self._tool_owner.items():
-            result.append({"tool": tname, "server": sname})
+        for tname, package in self._tool_owner.items():
+            result.append({"tool": tname, "server": package})
         return result
 
     def close(self) -> None:
@@ -307,14 +306,16 @@ class MCPToolLoader:
 
 # ── 便捷函数 ──────────────────────────────────────────────
 
-def load_mcp_toolkits(rules_file: str | Path | None = None) -> dict[str, ToolKit]:
-    """一键加载所有 MCP 工具并分组.
+def load_mcp_toolkits(rules_file: str | Path | None = None,
+                      server_args: dict[str, list[str]] | None = None) -> dict[str, ToolKit]:
+    """一键加载所有配置的 MCP 工具并分组.
 
     参数:
         rules_file: 分组规则 JSON 路径 (可选).
+        server_args: 服务器附加参数, 如 {".../server-filesystem": ["/tmp"]}
 
     返回:
         {组名: ToolKit} 字典.
     """
-    loader = MCPToolLoader(rules_file)
+    loader = MCPToolLoader(rules_file, server_args=server_args)
     return loader.load()

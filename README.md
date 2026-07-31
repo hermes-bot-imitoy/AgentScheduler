@@ -271,9 +271,19 @@ hr.add_toolkit(create_hr_toolkit())   # 一次导入所有 HR 工具
 
 ### 安装 MCP 工具
 
-MCP (Model Context Protocol) 工具来自外部服务器。项目使用 `MCPToolLoader` 统一加载所有配置的服务器，并按分组规则自动分组。
+MCP (Model Context Protocol) 工具来自外部服务器。本项目**不负责安装**任何服务器，用户通过 npx 自行准备。加载器使用 MCP Python SDK 连接服务器并获取工具列表，按分组规则自动分组。
 
-**1. 安装 MCP Python SDK**：
+**1. 用户用 npx 准备 MCP 服务器**（首次运行会自动下载包）：
+
+```bash
+# 官方常用服务器
+npx -y @modelcontextprotocol/server-memory
+npx -y @modelcontextprotocol/server-filesystem /tmp
+npx -y @modelcontextprotocol/server-github
+npx -y @modelcontextprotocol/server-git --repo /path/to/repo
+```
+
+**2. 安装 MCP Python SDK**：
 
 ```bash
 cd maf_scheduler
@@ -281,27 +291,16 @@ source .venv/bin/activate
 pip install mcp
 ```
 
-**2. 配置 MCP 服务器与分组规则**：
+**3. 配置要加载的服务器（只写 npx 包名）**：
 
-编辑 `src/config/mcp_group_rules.json`，声明要连接的服务器和分组规则：
+编辑 `src/config/mcp_group_rules.json`：
 
 ```json
 {
   "servers": [
-    {
-      "name": "filesystem",
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
-      "env": {},
-      "description": "文件系统操作服务器"
-    },
-    {
-      "name": "github",
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-github"],
-      "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_xxx"},
-      "description": "GitHub 操作服务器"
-    }
+    "@modelcontextprotocol/server-memory",
+    "@modelcontextprotocol/server-filesystem",
+    "@modelcontextprotocol/server-github"
   ],
   "groups": [
     {"name": "file_ops", "description": "文件操作工具组",
@@ -314,11 +313,11 @@ pip install mcp
 }
 ```
 
+- `servers` 只列 npx 包名，加载器自动构造 `npx -y <包名>` 启动命令
 - `match` 支持通配符（`git_*` 匹配所有 git_ 开头的工具）
-- 工具按名称匹配分组，未匹配的进入 `default_group`
-- 同名工具冲突时保留先注册的版本并打印警告
+- 未匹配的工具进入 `default_group`
 
-**3. 加载 MCP 工具**：
+**4. 加载 MCP 工具**：
 
 ```python
 from src.python_tools.mcp_toolkit import MCPToolLoader, load_mcp_toolkits
@@ -327,8 +326,11 @@ from src.python_tools.mcp_toolkit import MCPToolLoader, load_mcp_toolkits
 toolkits = load_mcp_toolkits()
 # → {"file_ops": ToolKit, "git_ops": ToolKit, "default": ToolKit}
 
-# 方式二: 管理连接生命周期
-loader = MCPToolLoader()          # 可传 rules_file 指定规则文件
+# 方式二: 管理连接生命周期 + 传递服务器附加参数
+loader = MCPToolLoader(
+    rules_file=None,  # 可指定自定义规则文件
+    server_args={"@modelcontextprotocol/server-filesystem": ["/tmp", "/home/openclaw"]},
+)
 toolkits = loader.load()          # 连接服务器 + 加载工具 + 分组
 loader.close()                    # 关闭所有服务器连接
 
@@ -338,16 +340,16 @@ dev.add_toolkit(toolkits["file_ops"])   # 只导入文件操作工具组
 dev.add_toolkit(toolkits["git_ops"])    # 再导入 git 工具组
 ```
 
-**4. 常用 MCP 服务器**：
+**5. 常用 MCP 服务器**：
 
-| 服务器 | 命令 | 工具示例 |
-|--------|------|---------|
-| GitHub | `npx -y @modelcontextprotocol/server-github` | create_issue, search_repos |
-| Filesystem | `npx -y @modelcontextprotocol/server-filesystem /path` | read_file, write_file |
-| Git | `npx -y @modelcontextprotocol/server-git --repo /path` | git_status, git_commit |
-| Memory | `npx -y @modelcontextprotocol/server-memory` | create_entities, create_relations |
+| 服务器 (npx 包名) | 工具示例 |
+|--------|---------|
+| `@modelcontextprotocol/server-github` | create_issue, search_repos |
+| `@modelcontextprotocol/server-filesystem` | read_file, write_file |
+| `@modelcontextprotocol/server-git` | git_status, git_commit |
+| `@modelcontextprotocol/server-memory` | create_entities, create_relations |
 
-**5. 工具冲突处理**：
+**6. 工具冲突处理**：
 
 当两个工具类（含 MCP 分组）注册了同名工具时，`ToolRegistry` 会跳过新工具并打印警告，保留先注册的版本：
 
