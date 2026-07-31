@@ -27,7 +27,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 # ── API Key Configuration ────────────────────────────────────
 
 os.environ.setdefault("DEEPSEEK_API_KEY", "sk-f29a3265f9e34c3bbf8f86f9142a57c9")
-os.environ.setdefault("DEEPSEEK_MODEL", "deepseek-chat")
+os.environ.setdefault("DEEPSEEK_MODEL", "deepseek-v4-flash")
+os.environ.setdefault("DEEPSEEK_THINKING", "true")
 
 from src.core.event_bus import EventBus
 from src.core.scheduler import ShiftScheduler

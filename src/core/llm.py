@@ -1,7 +1,10 @@
 """DeepSeek LLM Client — 真实 AI 后端接入.
 
-Replaces MockLLM with real API calls to DeepSeek (OpenAI-compatible).
-Same interface: chat(system, user) → (response_text, tokens_consumed).
+DeepSeek V4 Flash with optional thinking (reasoning) mode.
+OpenAI-compatible API: chat(system, user) → (response_text, tokens_consumed).
+
+Thinking mode: set DEEPSEEK_THINKING=true or pass thinking=True.
+When enabled, DeepSeek returns reasoning_content before the final answer.
 """
 
 from __future__ import annotations
@@ -18,17 +21,20 @@ logger = logging.getLogger(__name__)
 
 DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
-DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash")
+DEEPSEEK_THINKING = os.environ.get("DEEPSEEK_THINKING", "").lower() in ("1", "true", "yes", "on")
 
 DEFAULT_MAX_TOKENS = 512
 DEFAULT_TEMPERATURE = 0.7
 
 
 class DeepSeekLLM:
-    """Real DeepSeek API client with OpenAI-compatible chat completions.
+    """Real DeepSeek API client with optional thinking (chain-of-thought) mode.
 
     Usage:
         llm = DeepSeekLLM(api_key="sk-...")
+        # Thinking mode via env: DEEPSEEK_THINKING=true
+        # or constructor: DeepSeekLLM(thinking=True)
         text, tokens = llm.chat(system="You are helpful.", user="Hello")
         text, tokens = llm.summarize(log_text="...")
     """
@@ -38,10 +44,12 @@ class DeepSeekLLM:
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         model: Optional[str] = None,
+        thinking: Optional[bool] = None,
     ):
         self.api_key = api_key or DEEPSEEK_API_KEY
         self.base_url = (base_url or DEEPSEEK_BASE_URL).rstrip("/")
         self.model = model or DEEPSEEK_MODEL
+        self.thinking = thinking if thinking is not None else DEEPSEEK_THINKING
 
         if not self.api_key:
             raise ValueError(
@@ -99,23 +107,39 @@ class DeepSeekLLM:
         temperature: float,
         max_tokens: int,
     ) -> tuple[str, Optional[dict]]:
-        """Core API call. Returns (content_text, usage_dict)."""
+        """Core API call. Returns (content_text, usage_dict).
+
+        When thinking mode is enabled, DeepSeek returns reasoning_content
+        before the final content. We include reasoning in debug logs but
+        return only the final content to the caller.
+        """
         url = f"{self.base_url}/v1/chat/completions"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
-        payload = {
+        payload: dict = {
             "model": self.model,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
 
-        logger.debug("DeepSeek API call: model=%s messages=%d", self.model, len(messages))
+        # Enable thinking mode for deepseek-v4-flash and compatible models
+        if self.thinking:
+            payload["thinking"] = {"type": "enabled"}
+            # When thinking is enabled, max_tokens must be >= thinking budget
+            # Set a higher default to leave room for reasoning
+            if max_tokens < 1024:
+                payload["max_tokens"] = 1024
+
+        logger.debug(
+            "DeepSeek API call: model=%s messages=%d thinking=%s",
+            self.model, len(messages), self.thinking,
+        )
 
         try:
-            resp = requests.post(url, json=payload, headers=headers, timeout=60)
+            resp = requests.post(url, json=payload, headers=headers, timeout=120)
             resp.raise_for_status()
             data = resp.json()
         except requests.exceptions.Timeout:
@@ -126,10 +150,34 @@ class DeepSeekLLM:
             return f"[API error: {e}]", None
 
         choice = data.get("choices", [{}])[0]
-        content = choice.get("message", {}).get("content", "")
+        message = choice.get("message", {})
+
+        # Extract content — if thinking is enabled, reasoning_content is separate
+        content = message.get("content", "")
+        reasoning = message.get("reasoning_content", "")
+
+        if reasoning:
+            logger.debug("DeepSeek reasoning (%d chars): %s", len(reasoning), reasoning[:200])
+
+        # If content is empty but thinking was enabled, the model might have
+        # put everything in reasoning_content (edge case)
+        if not content and reasoning:
+            logger.warning("DeepSeek: empty content, falling back to reasoning_content")
+            content = reasoning
+
         usage = data.get("usage")
 
         if not content:
             logger.warning("DeepSeek returned empty content. Raw: %s", str(data)[:200])
+
+        # Log token breakdown when thinking is on
+        if usage and self.thinking:
+            logger.debug(
+                "DeepSeek tokens: prompt=%s completion=%s reasoning=%s total=%s",
+                usage.get("prompt_tokens", "?"),
+                usage.get("completion_tokens", "?"),
+                usage.get("completion_tokens_details", {}).get("reasoning_tokens", "?"),
+                usage.get("total_tokens", "?"),
+            )
 
         return content, usage
