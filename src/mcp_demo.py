@@ -48,16 +48,6 @@ def header(text: str) -> None:
 
 # ── Mock tool handlers ────────────────────────────────────
 
-def _get_server_status(args: dict) -> str:
-    """Simulate checking server health."""
-    return json.dumps({
-        "status": "healthy",
-        "cpu": "42%",
-        "memory": "3.2GB / 8GB",
-        "uptime": "14d 3h",
-        "active_connections": 1287,
-    })
-
 def _query_db(args: dict) -> str:
     """Simulate database query."""
     query = args.get("query", "").lower()
@@ -77,15 +67,6 @@ def _query_db(args: dict) -> str:
         })
     return '{"result": "no matching data"}'
 
-def _run_command(args: dict) -> str:
-    """Simulate running a shell command."""
-    cmd = args.get("command", "")
-    if "kubectl" in cmd and "pods" in cmd:
-        return "NAME                          READY   STATUS    RESTARTS   AGE\napi-gateway-7d4f8b-abc12   1/1     Running   0          2d\nworker-pool-5c8f3a-def34    0/1     OOMKilled 12         1h\nredis-cache-9a2b1c-ghi56   1/1     Running   1          7d"
-    elif "ps" in cmd:
-        return "USER       PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND\nroot         1  0.0  0.1 169876 12456 ?        Ss   08:00   0:02 /sbin/init\napp      12345 85.3 72.4 4523876 5800123 ?    Sl   07:55  15:23 java -jar worker.jar"
-    return f"Command '{cmd}' executed successfully."
-
 import json
 
 
@@ -102,19 +83,11 @@ def main():
         skills=["Kubernetes", "Prometheus", "PostgreSQL", "Linux"],
     )
 
-    # Register MCP tools on the ops role
-    ops_bot.add_mcp_tool(
-        name="server_status",
-        description="Get current server health metrics (CPU, memory, uptime, connections)",
-        input_schema={
-            "type": "object",
-            "properties": {
-                "server_name": {"type": "string", "description": "Server name or 'all'"},
-            },
-        },
-        handler=_get_server_status,
-    )
+    # Import Python toolkits (bulk registration)
+    from src.core.tools import create_coding_toolkit
 
+    ops_bot.add_toolkit(create_coding_toolkit())
+    # Single MCP-style tools still work too
     ops_bot.add_mcp_tool(
         name="query_logs",
         description="Query recent application logs and error messages",
@@ -128,22 +101,10 @@ def main():
         handler=_query_db,
     )
 
-    ops_bot.add_mcp_tool(
-        name="run_command",
-        description="Execute a diagnostic shell command on the server (kubectl, ps, top, etc.)",
-        input_schema={
-            "type": "object",
-            "properties": {
-                "command": {"type": "string", "description": "Shell command to execute"},
-            },
-            "required": ["command"],
-        },
-        handler=_run_command,
-    )
-
-    print(f"  {GREEN}ops bot created with 3 MCP tools:{RESET}")
+    print(f"  {GREEN}ops bot tools:{RESET}")
     for name in ops_bot.mcp_tool_names:
         print(f"    - {name}")
+    print(f"  (coding toolkit: 3 tools + query_logs = 4 total)\n")
 
     # ── Start pool ──────────────────────────────────────────
 
@@ -165,9 +126,9 @@ def main():
     pool.start()
 
     # ════════════════════════════════════════════════════════════
-    #  Scenario 1: Task that requires tool use
+    #  Scenario 1: Diagnose with coding toolkit + custom tools
     # ════════════════════════════════════════════════════════════
-    header("Scenario 1: Diagnose Production Issue with Tool Calling")
+    header("Scenario 1: Diagnose Production Issue (coding toolkit + query_logs)")
 
     pool.assign_task("ops", Task(
         urgency=Urgency.CRITICAL,

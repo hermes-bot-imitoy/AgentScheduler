@@ -218,7 +218,7 @@ class AgentRole:
     def is_busy(self) -> bool:
         return self._current_task is not None
 
-    # ── MCP Tool Management ────────────────────────────────
+    # ── MCP & Python Tool Management ────────────────────────
 
     def add_mcp_tool(
         self,
@@ -227,22 +227,30 @@ class AgentRole:
         input_schema: dict[str, Any],
         handler: Callable[[dict[str, Any]], str],
     ) -> None:
-        """Register an MCP-compatible tool for this role.
+        """Register a single Python/MCP tool for this role (backward-compatible).
 
-        Tools are made available to the LLM during task execution.
-        The LLM can decide to call tools to gather information or perform actions.
-
-        Args:
-            name: Tool name (e.g. "read_logs", "query_db")
-            description: Human-readable description for the LLM
-            input_schema: JSON Schema dict for tool arguments
-            handler: Callable that executes the tool, returns result string
+        For bulk tool registration, use add_toolkit() instead.
         """
         from src.core.tools import ToolRegistry
 
         if self._tools is None:
             self._tools = ToolRegistry()
         self._tools.add_tool(name, description, input_schema, handler)
+
+    def add_toolkit(self, toolkit: Any) -> int:
+        """Import an entire ToolKit (collection of related tools).
+
+        Args:
+            toolkit: A ToolKit instance (from src.core.tools)
+
+        Returns:
+            Number of new tools added (skips duplicates).
+        """
+        from src.core.tools import ToolRegistry
+
+        if self._tools is None:
+            self._tools = ToolRegistry()
+        return self._tools.add_toolkit(toolkit)
 
     @property
     def mcp_tool_names(self) -> list[str]:
@@ -253,80 +261,17 @@ class AgentRole:
     # ── Inter-role Communication (talk) ────────────────────
 
     def _register_talk_tool(self) -> None:
-        """Auto-register the 'talk' tool for inter-role communication."""
+        """Auto-register the 'talk' tool as a Python ToolKit."""
         if self._pool is None:
             return
         if "talk" in self.mcp_tool_names:
             return  # already registered
 
-        pool_ref = self._pool  # capture for closure
+        from src.core.tools import create_talk_toolkit
 
-        # Build rich team roster for the LLM
-        roster_lines: list[str] = []
-        for rid, r in pool_ref._roles.items():
-            resp = r.responsibilities or r.title
-            roster_lines.append(
-                f"  - **{r.name}** (role_id: `{rid}`) — {resp}"
-                f"  Skills: {', '.join(r.skills[:4])}"
-            )
-        team_roster = "\n".join(roster_lines)
-
-        def talk_handler(args: dict[str, Any]) -> str:
-            target = args.get("target", "")
-            message = args.get("message", "")
-            urgency_str = args.get("urgency", "NORMAL")
-
-            if not target or not message:
-                return "Error: 'target' and 'message' are required."
-
-            target_role = pool_ref.get_role(target)
-            urgency = getattr(Urgency, urgency_str.upper(), Urgency.NORMAL)
-
-            task = Task(
-                urgency=urgency,
-                description=f"[FROM {self.role_id}({self.name})] {message}",
-                source=f"talk:{self.role_id}",
-                context={"sender": self.role_id, "sender_name": self.name, "original_message": message},
-            )
-            target_role.add_task(task)
-            return (
-                f"Message sent to {target_role.name} ({target}) (urgency={urgency.name}). "
-                f"Their queue now has {target_role.queue_depth} task(s)."
-            )
-
-        self.add_mcp_tool(
-            name="talk",
-            description=(
-                "Send a message or delegate a task to a teammate. "
-                "Choose the right person based on their responsibilities.\n\n"
-                f"**Team Roster:**\n{team_roster}\n\n"
-                "Use the `role_id` as the `target` parameter."
-            ),
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "target": {
-                        "type": "string",
-                        "description": (
-                            "Target person's role_id. "
-                            f"Available: {', '.join(pool_ref.list_roles())}"
-                        ),
-                    },
-                    "message": {
-                        "type": "string",
-                        "description": "The message or task to delegate. Be specific about what you need.",
-                    },
-                    "urgency": {
-                        "type": "string",
-                        "enum": ["LOW", "NORMAL", "HIGH", "CRITICAL"],
-                        "description": "How urgent is this? CRITICAL for production incidents.",
-                    },
-                },
-                "required": ["target", "message"],
-            },
-            handler=talk_handler,
-        )
-        logger.info("[%s] talk tool registered → %s", self.role_id, pool_ref.list_roles())
+        tk = create_talk_toolkit(self._pool)
+        added = self.add_toolkit(tk)
+        logger.info("[%s] talk toolkit loaded — %d tools", self.role_id, added)
 
     def talk_to(self, target: str, message: str, urgency: str = "NORMAL") -> str:
         """Programmatic inter-role communication (non-LLM path)."""
