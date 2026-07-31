@@ -261,13 +261,13 @@ class AgentRole:
     # ── Inter-role Communication (talk) ────────────────────
 
     def _register_talk_tool(self) -> None:
-        """Auto-register the 'talk' tool as a Python ToolKit."""
+        """自动注册 talk 工具类. 在 RolePool.start() 时调用, 将 communication 工具类注入角色."""
         if self._pool is None:
             return
         if "talk" in self.mcp_tool_names:
             return  # already registered
 
-        from src.core.tools import create_talk_toolkit
+        from src.python_tools.talk_toolkit import create_talk_toolkit
 
         tk = create_talk_toolkit(self._pool)
         added = self.add_toolkit(tk)

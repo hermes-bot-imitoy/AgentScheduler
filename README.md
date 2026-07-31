@@ -245,6 +245,109 @@ coder.talk_to("reviewer", "请审查 PR #188", urgency="HIGH")
 
 ---
 
+## 工具系统：Python 工具 与 MCP 工具
+
+### Python 工具类（ToolKit）
+
+项目内置 `src/python_tools/` 文件夹，存放 Python 实现的工具类：
+
+```
+src/python_tools/
+├── __init__.py
+├── talk_toolkit.py        # 通信工具类: talk (角色间消息传递)
+├── hr_toolkit.py          # 人力资源工具类: post_job_posting (发布招聘), list_candidates
+└── examples/
+    └── add_python_tool.py # 示例: 如何添加一个 Python 工具
+```
+
+角色可以一次导入整个工具类：
+
+```python
+from src.python_tools.hr_toolkit import create_hr_toolkit
+
+hr = pool.get_role("hr")
+hr.add_toolkit(create_hr_toolkit())   # 一次导入所有 HR 工具
+```
+
+### 安装 MCP 工具
+
+MCP (Model Context Protocol) 工具来自外部服务器，需要通过 stdio 或 SSE 连接。
+
+**1. 安装 MCP Python SDK**：
+
+```bash
+cd maf_scheduler
+source .venv/bin/activate
+pip install mcp
+```
+
+**2. 从 MCP 服务器创建工具类**：
+
+```python
+from src.core.tools import ToolKit
+
+# 方式一: 从 stdio MCP server 加载 (如 GitHub, Filesystem, Git 等官方服务器)
+github_tk = ToolKit.from_mcp_server(
+    name="github",                              # 工具类名
+    command="npx",                              # 启动命令
+    args=["-y", "@modelcontextprotocol/server-github"],  # 服务器参数
+    env={"GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_xxx"},     # 可选环境变量
+)
+
+# 方式二: 从 Python 实现的 MCP server 加载
+filesystem_tk = ToolKit.from_mcp_server(
+    name="filesystem",
+    command="python",
+    args=["-m", "mcp_server_filesystem", "/path/to/allowed/dir"],
+)
+
+# 注册到角色
+dev = pool.get_role("fullstack_dev")
+dev.add_toolkit(github_tk)
+dev.add_toolkit(filesystem_tk)
+```
+
+**3. 常用 MCP 服务器**：
+
+| 服务器 | 命令 | 工具示例 |
+|--------|------|---------|
+| GitHub | `npx -y @modelcontextprotocol/server-github` | create_issue, search_repos |
+| Filesystem | `npx -y @modelcontextprotocol/server-filesystem /path` | read_file, write_file |
+| Git | `npx -y @modelcontextprotocol/server-git --repo /path` | git_status, git_commit |
+| Memory | `npx -y @modelcontextprotocol/server-memory` | create_entities, create_relations |
+
+**4. 工具冲突处理**：
+
+当两个工具类注册了同名工具时，`ToolRegistry` 会跳过新工具并打印警告，保留先注册的版本：
+
+```python
+coding = create_coding_toolkit()      # 包含 read_file
+other = ToolKit("other")              # 也定义 read_file
+reg.add_toolkit(coding)               # 3 个工具
+reg.add_toolkit(other)                # read_file 冲突 → 跳过, 保留 coding 的版本
+```
+
+### HR 招聘工具示例
+
+```python
+from src.python_tools.hr_toolkit import create_hr_toolkit
+
+hr = pool.get_role("hr")
+hr.add_toolkit(create_hr_toolkit())
+
+# 方式一: 编程式直接调用 (HR 处理 COO 的招聘申请时由 LLM 触发)
+result = hr._tools.call_tool("post_job_posting", {
+    "requirement": "需要一位精通 Rust 的后端工程师, 熟悉 gRPC 和 PostgreSQL",
+})
+# → 后台调用提示词魔术师(RoleFactory)生成新角色, 自动注册到模板池
+# → 返回新角色的 role_id/姓名/职位/技能等配置
+
+# 方式二: 通过 LLM 触发 (COO 发来招聘需求, HR 的 LLM 决定调用工具)
+coo.talk_to("hr", "请发布招聘: 需要一位精通 Rust 的后端工程师", "HIGH")
+```
+
+---
+
 ## 环境变量
 
 | 变量 | 默认值 | 说明 |
