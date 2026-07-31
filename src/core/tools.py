@@ -79,10 +79,6 @@ class ToolKit:
 
         # Role imports the whole toolkit
         role.add_toolkit(coding)
-
-        # MCP toolkit (from server)
-        github = ToolKit.from_mcp_server("github", command="npx", args=["-y", "@modelcontextprotocol/server-github"])
-        role.add_toolkit(github)
     """
 
     def __init__(self, name: str, description: str = ""):
@@ -112,68 +108,6 @@ class ToolKit:
         self._tools[name] = td
         logger.info("ToolKit[%s] Python tool: %s", self.name, name)
         return td
-
-    # ── MCP tool loading ──────────────────────────────────
-
-    @classmethod
-    def from_mcp_server(
-        cls,
-        name: str,
-        command: str,
-        args: list[str],
-        env: Optional[dict[str, str]] = None,
-        description: str = "",
-    ) -> "ToolKit":
-        """Create a toolkit by connecting to an MCP server (stdio transport).
-
-        Args:
-            name: Toolkit name
-            command: MCP server command (e.g. "npx", "python")
-            args: Command arguments (e.g. ["-y", "@modelcontextprotocol/server-github"])
-            env: Optional environment variables
-            description: Human-readable description
-
-        Returns:
-            ToolKit with tools discovered from the MCP server
-        """
-        toolkit = cls(name=name, description=description or f"MCP tools from {command} {' '.join(args)}")
-
-        if not MCP_AVAILABLE:
-            logger.warning("ToolKit[%s]: mcp package not installed, skipping MCP server load", name)
-            return toolkit
-
-        try:
-            import asyncio
-            from mcp.client.stdio import stdio_client, StdioServerParameters
-
-            async def _load():
-                server_params = StdioServerParameters(
-                    command=command,
-                    args=args,
-                    env=env,
-                )
-                async with stdio_client(server_params) as (read, write):
-                    from mcp import ClientSession
-                    async with ClientSession(read, write) as session:
-                        await session.initialize()
-                        tools_result = await session.list_tools()
-                        for tool in tools_result.tools:
-                            td = ToolDef(
-                                name=tool.name,
-                                description=tool.description or "",
-                                input_schema=tool.input_schema if hasattr(tool, 'input_schema') else {},
-                                handler=None,  # MCP tools are called via session
-                                source="mcp",
-                                mcp_tool=tool,
-                            )
-                            toolkit._tools[tool.name] = td
-                            logger.info("ToolKit[%s] MCP tool: %s", name, tool.name)
-
-            asyncio.run(_load())
-        except Exception as exc:
-            logger.error("ToolKit[%s]: failed to load MCP server: %s", name, exc)
-
-        return toolkit
 
     # ── Properties ────────────────────────────────────────
 

@@ -271,7 +271,7 @@ hr.add_toolkit(create_hr_toolkit())   # 一次导入所有 HR 工具
 
 ### 安装 MCP 工具
 
-MCP (Model Context Protocol) 工具来自外部服务器，需要通过 stdio 或 SSE 连接。
+MCP (Model Context Protocol) 工具来自外部服务器。项目使用 `MCPToolLoader` 统一加载所有配置的服务器，并按分组规则自动分组。
 
 **1. 安装 MCP Python SDK**：
 
@@ -281,33 +281,64 @@ source .venv/bin/activate
 pip install mcp
 ```
 
-**2. 从 MCP 服务器创建工具类**：
+**2. 配置 MCP 服务器与分组规则**：
+
+编辑 `src/config/mcp_group_rules.json`，声明要连接的服务器和分组规则：
+
+```json
+{
+  "servers": [
+    {
+      "name": "filesystem",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+      "env": {},
+      "description": "文件系统操作服务器"
+    },
+    {
+      "name": "github",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_xxx"},
+      "description": "GitHub 操作服务器"
+    }
+  ],
+  "groups": [
+    {"name": "file_ops", "description": "文件操作工具组",
+     "match": ["read_file", "write_file", "edit_file", "list_directory"]},
+    {"name": "git_ops", "description": "Git 与代码仓库工具组",
+     "match": ["git_*", "search_repos", "create_issue"]},
+    {"name": "default", "description": "未分组工具默认归属", "match": []}
+  ],
+  "default_group": "default"
+}
+```
+
+- `match` 支持通配符（`git_*` 匹配所有 git_ 开头的工具）
+- 工具按名称匹配分组，未匹配的进入 `default_group`
+- 同名工具冲突时保留先注册的版本并打印警告
+
+**3. 加载 MCP 工具**：
 
 ```python
-from src.core.tools import ToolKit
+from src.python_tools.mcp_toolkit import MCPToolLoader, load_mcp_toolkits
 
-# 方式一: 从 stdio MCP server 加载 (如 GitHub, Filesystem, Git 等官方服务器)
-github_tk = ToolKit.from_mcp_server(
-    name="github",                              # 工具类名
-    command="npx",                              # 启动命令
-    args=["-y", "@modelcontextprotocol/server-github"],  # 服务器参数
-    env={"GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_xxx"},     # 可选环境变量
-)
+# 方式一: 一次性加载 (默认读取 src/config/mcp_group_rules.json)
+toolkits = load_mcp_toolkits()
+# → {"file_ops": ToolKit, "git_ops": ToolKit, "default": ToolKit}
 
-# 方式二: 从 Python 实现的 MCP server 加载
-filesystem_tk = ToolKit.from_mcp_server(
-    name="filesystem",
-    command="python",
-    args=["-m", "mcp_server_filesystem", "/path/to/allowed/dir"],
-)
+# 方式二: 管理连接生命周期
+loader = MCPToolLoader()          # 可传 rules_file 指定规则文件
+toolkits = loader.load()          # 连接服务器 + 加载工具 + 分组
+loader.close()                    # 关闭所有服务器连接
 
 # 注册到角色
 dev = pool.get_role("fullstack_dev")
-dev.add_toolkit(github_tk)
-dev.add_toolkit(filesystem_tk)
+dev.add_toolkit(toolkits["file_ops"])   # 只导入文件操作工具组
+dev.add_toolkit(toolkits["git_ops"])    # 再导入 git 工具组
 ```
 
-**3. 常用 MCP 服务器**：
+**4. 常用 MCP 服务器**：
 
 | 服务器 | 命令 | 工具示例 |
 |--------|------|---------|
@@ -316,15 +347,15 @@ dev.add_toolkit(filesystem_tk)
 | Git | `npx -y @modelcontextprotocol/server-git --repo /path` | git_status, git_commit |
 | Memory | `npx -y @modelcontextprotocol/server-memory` | create_entities, create_relations |
 
-**4. 工具冲突处理**：
+**5. 工具冲突处理**：
 
-当两个工具类注册了同名工具时，`ToolRegistry` 会跳过新工具并打印警告，保留先注册的版本：
+当两个工具类（含 MCP 分组）注册了同名工具时，`ToolRegistry` 会跳过新工具并打印警告，保留先注册的版本：
 
 ```python
 coding = create_coding_toolkit()      # 包含 read_file
-other = ToolKit("other")              # 也定义 read_file
-reg.add_toolkit(coding)               # 3 个工具
-reg.add_toolkit(other)                # read_file 冲突 → 跳过, 保留 coding 的版本
+file_tk = toolkits["file_ops"]        # MCP 也有 read_file
+reg.add_toolkit(coding)               # 先注册, read_file 保留 coding 版本
+reg.add_toolkit(file_tk)              # read_file 冲突 → 跳过, 保留 coding 版本
 ```
 
 ### HR 招聘工具示例

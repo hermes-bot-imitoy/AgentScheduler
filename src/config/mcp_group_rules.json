@@ -1,0 +1,66 @@
+{
+  "servers": [
+    {
+      "name": "filesystem",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp", "/home/openclaw"],
+      "env": {},
+      "description": "文件系统操作服务器"
+    },
+    {
+      "name": "github",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": ""
+      },
+      "description": "GitHub 操作服务器"
+    }
+  ],
+  "groups": [
+    {
+      "name": "file_ops",
+      "description": "文件操作工具组",
+      "match": [
+        "read_file",
+        "write_file",
+        "edit_file",
+        "list_directory",
+        "search_files",
+        "create_directory",
+        "move_file",
+        "delete_file"
+      ]
+    },
+    {
+      "name": "git_ops",
+      "description": "Git 与代码仓库工具组",
+      "match": [
+        "git_*",
+        "create_issue",
+        "create_pull_request",
+        "get_issue",
+        "search_repos",
+        "search_code",
+        "list_issues",
+        "merge_pull_request"
+      ]
+    },
+    {
+      "name": "github_ops",
+      "description": "GitHub 平台工具组",
+      "match": [
+        "github_*",
+        "gh_*",
+        "get_*",
+        "list_*"
+      ]
+    },
+    {
+      "name": "default",
+      "description": "未分组工具默认归属",
+      "match": []
+    }
+  ],
+  "default_group": "default"
+}
