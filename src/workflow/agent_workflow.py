@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 _llm: Optional[DeepSeekLLM] = None
 
 
+# # 获取或创建模块级DeepSeek LLM客户端(惰性初始化)
 def get_llm() -> DeepSeekLLM:
     """Get or create the module-level DeepSeek LLM client."""
     global _llm
@@ -31,6 +32,7 @@ def get_llm() -> DeepSeekLLM:
     return _llm
 
 
+# # 注入自定义LLM实例(用于测试或配置)
 def set_llm(llm: DeepSeekLLM) -> None:
     """Inject a custom LLM instance (for testing or config)."""
     global _llm
@@ -39,6 +41,7 @@ def set_llm(llm: DeepSeekLLM) -> None:
 
 # ── Workflow Node Handlers ────────────────────────────────
 
+# # 分类节点: 对事件/任务进行意图分类
 def node_classify_intent(ctx: WorkflowContext) -> Artifact:
     """Classify the incoming event/task intent."""
     event_data = ctx.task_input.get("event")
@@ -64,6 +67,7 @@ def node_classify_intent(ctx: WorkflowContext) -> Artifact:
     )
 
 
+# # 任务处理节点: 根据分类结果执行实际任务
 def node_handle_task(ctx: WorkflowContext) -> Artifact:
     """Execute the actual task based on classified intent."""
     intent = ctx.node_outputs.get("classify", Artifact()).data.get("intent", "unknown")
@@ -85,6 +89,7 @@ def node_handle_task(ctx: WorkflowContext) -> Artifact:
     )
 
 
+# # 汇总节点: 生成工作流的结构化摘要
 def node_summarize(ctx: WorkflowContext) -> Artifact:
     """Generate a structured summary from the full workflow trace."""
     # Collect all node outputs
@@ -106,6 +111,7 @@ def node_summarize(ctx: WorkflowContext) -> Artifact:
 
 # ── Graph Registration ────────────────────────────────────
 
+# # 注册标准业务工作流图: classify -> handle_task -> summarize
 def build_business_workflow(engine: WorkflowEngine) -> None:
     """Register the standard business workflow graph."""
     nodes = [

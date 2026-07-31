@@ -32,6 +32,7 @@ class PersonaRelevanceFn(Protocol):
 
 # ── Default relevance policy ───────────────────────────────
 
+# # 默认相关性评分器(关键词匹配). 生产环境应替换为RAG/embedding. 返回0~1分数
 def _default_relevance(event: Event) -> float:
     """Simple keyword-based relevance scorer. Replace with RAG/embedding for production.
 
@@ -68,6 +69,7 @@ def _default_relevance(event: Event) -> float:
 
 # ── Event Bus ───────────────────────────────────────────────
 
+# # 事件总线: 3层过滤器. Layer1=状态掩码(0Token), Layer2=显著性(关键词+优先级), Layer3=唤醒
 class EventBus:
     """The central event bus with multi-layer filtering.
 
@@ -109,6 +111,7 @@ class EventBus:
 
     # ── Pipeline ──────────────────────────────────────────
 
+# # 运行3层过滤管线. 参数event=事件, agent_id=Agent标识. 返回FilterDecision. 被拦截事件自动存入AmbientBuffer
     def process_event(self, event: Event, agent_id: str = "default") -> FilterDecision:
         """Run the event through the 3-layer filter pipeline.
 

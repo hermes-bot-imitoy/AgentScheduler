@@ -14,6 +14,7 @@ from typing import Optional
 from src.core.types import Journal
 
 
+# # 日记持久化存储(JSON文件). 目录: data_dir/agent_id/YYYY-MM-DD.json
 class JournalStore:
     """Flat-file journal storage.
 
@@ -29,6 +30,7 @@ class JournalStore:
 
     # ── Public API ──────────────────────────────────────────
 
+# # 持久化一篇日记. 返回文件路径
     def save(self, journal: Journal) -> str:
         """Persist a journal entry. Returns the file path."""
         agent_dir = self._data_dir / journal.agent_id
@@ -48,6 +50,7 @@ class JournalStore:
         filepath.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
         return str(filepath)
 
+# # 按Agent+日期加载日记. 返回Journal或None
     def load(self, agent_id: str, target_date: str) -> Optional[Journal]:
         """Load a journal by agent + date. Returns None if not found."""
         filepath = self._data_dir / agent_id / f"{target_date}.json"
@@ -66,6 +69,7 @@ class JournalStore:
             raw_log=data.get("raw_log", ""),
         )
 
+# # 加载最近日记. before_date为截止日期, 返回Journal或None
     def load_latest(self, agent_id: str, before_date: Optional[str] = None) -> Optional[Journal]:
         """Load the most recent journal for an agent (optionally before a given date).
 
@@ -85,6 +89,7 @@ class JournalStore:
                 return self.load(agent_id, file_date)
         return None
 
+# # 列出所有日记日期(最新在前)
     def list_dates(self, agent_id: str) -> list[str]:
         """Return all journal dates for an agent, newest first."""
         agent_dir = self._data_dir / agent_id

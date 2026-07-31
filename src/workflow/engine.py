@@ -24,6 +24,7 @@ WorkflowNodeFn = Callable[["WorkflowContext"], Artifact]
 
 
 @dataclass
+# # 工作流图节点: name, handler, next_node, conditional_routes, is_terminal
 class WorkflowNode:
     """A single node in a workflow graph."""
     name: str
@@ -34,6 +35,7 @@ class WorkflowNode:
 
 
 @dataclass
+# # 工作流运行时上下文: session, task_input, node_outputs, metadata
 class WorkflowContext:
     """Runtime context passed through nodes."""
     session: SessionContext
@@ -44,6 +46,7 @@ class WorkflowContext:
 
 # ── Engine ─────────────────────────────────────────────────
 
+# # 无状态工作流图执行器. 每个任务创建隔离上下文, 防止工具日志跨任务泄露
 class WorkflowEngine:
     """Stateless executor that drives a workflow graph through a SessionContext.
 
@@ -58,6 +61,7 @@ class WorkflowEngine:
 
     # ── Graph management ──────────────────────────────────
 
+# # 注册命名工作流图. graph_id=图标识, nodes=节点列表
     def register_graph(self, graph_id: str, nodes: list[WorkflowNode]) -> None:
         """Register a named workflow graph."""
         self._graphs[graph_id] = {n.name: n for n in nodes}
@@ -69,6 +73,7 @@ class WorkflowEngine:
 
     # ── Execution ─────────────────────────────────────────
 
+# # 执行工作流图. graph_id, session, task_input, entry_node. 返回Artifact(仅结构化产出)
     def execute(
         self,
         graph_id: str,

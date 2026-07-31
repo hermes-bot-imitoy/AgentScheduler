@@ -18,6 +18,7 @@ from src.core.types import Event, FilterDecision, Priority
 logger = logging.getLogger(__name__)
 
 
+# # 事件分发器: 将事件广播给所有角色, 每个角色独立运行3层过滤. PASS事件自动转Task插入队列
 class EventDispatcher:
     """Broadcasts events to all roles with per-role filtering.
 
@@ -44,6 +45,7 @@ class EventDispatcher:
 
     # ── Public API ─────────────────────────────────────────
 
+# # 触发事件广播. 返回{role_id: {accepted, reason, task_id}}. 每个角色调用evaluate_event()
     def trigger(self, event: Event) -> dict[str, dict[str, Any]]:
         """Fan out an event to ALL roles.
 

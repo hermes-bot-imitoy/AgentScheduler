@@ -36,6 +36,7 @@ CREATE INDEX IF NOT EXISTS idx_ambient_agent_ts
 """
 
 
+# # 线程安全的SQLite潜意识事件暂存区. 被拦截事件存入, 下班时取出给LLM总结. 0 Token消耗
 class AmbientBuffer:
     """Thread-safe SQLite-backed subconscious buffer.
 
@@ -54,6 +55,7 @@ class AmbientBuffer:
 
     # ── Public API ──────────────────────────────────────────
 
+# # 将事件存入缓冲区(零Token)
     def append(self, agent_id: str, event: Event) -> int:
         """Park an event in the ambient buffer (0-Token cost). Returns row id."""
         cursor = self._conn.execute(
@@ -77,6 +79,7 @@ class AmbientBuffer:
         self._conn.commit()
         return cursor.lastrowid or 0
 
+# # 原子操作: 取出所有待处理事件并标记为已冲刷
     def get_and_clear(self, agent_id: str) -> list[Event]:
         """Atomically fetch all pending events for an agent and mark them flushed.
 

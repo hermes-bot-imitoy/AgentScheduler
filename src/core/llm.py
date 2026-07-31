@@ -28,6 +28,7 @@ DEFAULT_MAX_TOKENS = 512
 DEFAULT_TEMPERATURE = 0.7
 
 
+# # DeepSeek API客户端, 支持思维链(thinking)模式. 参数: api_key, base_url, model, thinking
 class DeepSeekLLM:
     """Real DeepSeek API client with optional thinking (chain-of-thought) mode.
 
@@ -59,6 +60,7 @@ class DeepSeekLLM:
 
     # ── Public API (same interface as MockLLM) ─────────────
 
+# # 发送聊天请求. 返回(回复文本, Token数). 参数: system=系统提示, user=用户输入
     def chat(
         self,
         system: str,
@@ -76,6 +78,7 @@ class DeepSeekLLM:
         tokens = usage.get("total_tokens", 0) if usage else 0
         return response_text, tokens
 
+# # 从日志/文本生成简洁总结. 返回(总结文本, Token数)
     def summarize(
         self,
         log_text: str,
@@ -101,6 +104,7 @@ class DeepSeekLLM:
 
     # ── Internal ───────────────────────────────────────────
 
+# # 核心API调用. 返回(回复文本, usage字典). thinking模式自动启用推理并提取reasoning_content
     def _call_api(
         self,
         messages: list[dict[str, str]],

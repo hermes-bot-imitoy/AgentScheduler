@@ -23,6 +23,7 @@ from src.workflow.engine import WorkflowEngine
 logger = logging.getLogger(__name__)
 
 
+# # 作息调度器: 管理Agent上下班生命周期. 上班=加载日记+冷启动, 下班=总结+日记+ContextFlush
 class ShiftScheduler:
     """Manages agent shift lifecycle (on-duty / off-duty).
 
@@ -66,6 +67,7 @@ class ShiftScheduler:
     def state(self) -> AgentState:
         return self.session.state
 
+# # 上班流程: 加载昨日日记 -> 构建SystemPrompt -> ON_DUTY_IDLE. 返回诊断信息
     def run_shift_start(self) -> dict[str, Any]:
         """上班流程 (Shift Start Workflow).
 
@@ -113,6 +115,7 @@ class ShiftScheduler:
             "state": self.session.state.value,
         }
 
+# # 下班流程: 读AmbientBuffer -> 收集SessionTrace -> LLM写日记 -> 持久化 -> ContextFlush -> OFF_DUTY
     def run_shift_end(self) -> Journal:
         """下班流程 (Shift End Workflow).
 
@@ -151,6 +154,7 @@ class ShiftScheduler:
 
         return journal
 
+# # 执行业务工作流: ON_DUTY_IDLE -> ON_DUTY_BUSY -> ON_DUTY_IDLE. 返回Artifact
     def execute_task(self, event: Event, workflow_id: str = "business_workflow") -> Artifact:
         """Execute a business workflow in response to a waking event.
 
