@@ -34,11 +34,24 @@ def create_memory_toolkit() -> ToolKit:
 
     tk = ToolKit(name="memory", description="记忆与笔记工具类: 每日总结, 笔记管理")
 
+    # 工具类持有 store / role 引用 (由 AgentRole.add_toolkit 注入)
+    tk._store_holder = {"store": None}  # type: ignore[attr-defined]
+    tk._role_holder = {"role": None}    # type: ignore[attr-defined]
+
+    def _get_store() -> Any:
+        store = tk._store_holder["store"]  # type: ignore[attr-defined]
+        if store is None:
+            raise RuntimeError("记忆工具类尚未绑定 NoteStore, 请通过 role.add_toolkit() 注册")
+        return store
+
+    def _get_role() -> Any:
+        return tk._role_holder["role"]  # type: ignore[attr-defined]
+
     def _summary(args: dict[str, Any]) -> str:
-        """总结这一天. 保存后下一天自动注入提示词.
+        """总结这一天. 保存后下一天自动注入提示词, 并将角色切换为 OFF_DUTY.
 
         参数:
-            args: {"content": 今日总结内容, "date": 日期(可选, 默认今天)}
+            args: {"content": 今日总结内容, "day": 第几天(可选, 默认取角色当前天)}
 
         返回:
             保存确认信息.
@@ -47,10 +60,26 @@ def create_memory_toolkit() -> ToolKit:
         if not content:
             return "错误: 'content' (总结内容) 为必填参数."
 
-        # 通过角色绑定 NoteStore 保存总结
         store = _get_store()
-        path = store.save_summary(content, args.get("date"))
-        return f"当日总结已保存: {path}"
+        role = _get_role()
+
+        # 天序号: 显式传入或取角色当前天
+        day = args.get("day")
+        if day is None and role is not None:
+            day = role.time_manager.day_number()
+        if day is None:
+            day = 1
+
+        path = store.save_summary(content, day=day)
+
+        # 总结完成 → 角色下班 (OFF_DUTY)
+        if role is not None:
+            from src.core.types import AgentState
+            if role.state != AgentState.OFF_DUTY:
+                role.state = AgentState.OFF_DUTY
+                logger.info("[%s] 总结完成, 角色已切换为 OFF_DUTY", role.role_id)
+            return f"第 {day} 天总结已保存: {path}. 你已下班 (OFF_DUTY)."
+        return f"第 {day} 天总结已保存: {path}"
 
     def _write_note(args: dict[str, Any]) -> str:
         """写笔记.
@@ -122,27 +151,17 @@ def create_memory_toolkit() -> ToolKit:
             return f"笔记不存在: {title}"
         return content
 
-    # 通过 Toolkit 持有 store 引用 (在 add_toolkit 时注入)
-    # 方案: 使用线程局部变量在角色执行时设置 store
-    tk._store_holder = {"store": None}  # type: ignore[attr-defined]
-
-    def _get_store() -> Any:
-        store = tk._store_holder["store"]  # type: ignore[attr-defined]
-        if store is None:
-            raise RuntimeError("记忆工具类尚未绑定 NoteStore, 请通过 role.add_toolkit() 注册")
-        return store
-
     tk.add_python_tool(
         name="summary",
         description=(
-            "总结今天的工作. 调用此工具后, 总结内容会被保存, 并在下一天自动注入到你的系统提示词中, "
-            "帮助你记住昨天做了什么. content 应包含: 今日完成的工作, 关键决策, 未完成事项."
+            "总结今天的工作. 调用此工具后, 总结内容会被保存, 并在下一天自动注入到你的系统提示词中. "
+            "同时你会切换为 OFF_DUTY (下班) 状态. content 应包含: 今日完成的工作, 关键决策, 未完成事项."
         ),
         input_schema={
             "type": "object",
             "properties": {
                 "content": {"type": "string", "description": "今日总结内容"},
-                "date": {"type": "string", "description": "日期 (ISO 格式, 可选, 默认今天)"},
+                "day": {"type": "integer", "description": "第几天 (可选, 默认当前天)"},
             },
             "required": ["content"],
         },
@@ -200,11 +219,13 @@ def create_memory_toolkit() -> ToolKit:
     return tk
 
 
-def bind_store_to_toolkit(toolkit: ToolKit, store: Any) -> None:
+def bind_store_to_toolkit(toolkit: ToolKit, store: Any, role: Any = None) -> None:
     """将 NoteStore 绑定到工具类 (由 AgentRole.add_toolkit 内部调用).
 
     参数:
         toolkit: 记忆工具类实例
         store:   NoteStore 实例
+        role:    绑定的 AgentRole (可选, 用于 summary 后切换 OFF_DUTY)
     """
     toolkit._store_holder["store"] = store  # type: ignore[attr-defined]
+    toolkit._role_holder["role"] = role     # type: ignore[attr-defined]

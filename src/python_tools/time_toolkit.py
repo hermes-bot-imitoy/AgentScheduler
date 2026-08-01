@@ -36,7 +36,7 @@ def create_time_toolkit() -> ToolKit:
         """查看当前作息时间.
 
         参数:
-            args: 无 (可传 now 用于测试).
+            args: 无.
 
         返回:
             当前 Tick 数与作息状态描述.
@@ -45,27 +45,17 @@ def create_time_toolkit() -> ToolKit:
         if manager is None:
             raise RuntimeError("时间工具类尚未绑定 TimeManager, 请通过 role.add_toolkit() 注册")
 
-        now = args.get("now")
-        if now:
-            from datetime import datetime
-            now = datetime.fromisoformat(now)
-
-        tick = manager.current_tick(now)
-        return manager.describe(now) + f"\n当前 Tick 数: {tick}"
+        tick = manager.current_tick()
+        return manager.describe() + f"\n当前 Tick 数: {tick}"
 
     tk.add_python_tool(
         name="get_time",
         description=(
             "查看当前作息时间. 返回当前 Tick 数和作息状态. "
-            "时间规则: 1 Tick = 10 分钟, Tick 0 = 上班(09:00), Tick 60 = 下班(19:00). "
+            "时间规则: 1 Tick = 10 分钟, 系统启动 = Tick 0, 每天第 60 Tick 下班. "
             "用于判断现在是上班时间还是下班时间, 或距离下班还有多久."
         ),
-        input_schema={
-            "type": "object",
-            "properties": {
-                "now": {"type": "string", "description": "指定时间 (ISO 格式, 可选, 默认当前时间)"},
-            },
-        },
+        input_schema={"type": "object", "properties": {}},
         handler=_get_time,
     )
 

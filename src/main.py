@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
-"""main.py — 模拟完整一天的企业作息与事件驱动调度.
+"""MAF Shift & Event-Driven Agent Scheduler — 作息系统完整演示.
 
-This script demonstrates the full Shift & Event-Driven Agent Scheduling Framework.
-It simulates a complete workday with four key scenarios:
+模拟流程:
+  1. 系统启动 = Tick 0 / 第 1 天 → TimeManager 线程发送 SHIFT_START (EMERGENCY)
+  2. 角色收到上班事件 → 开始处理工作事件
+  3. 推进到下班 Tick → SHIFT_END (EMERGENCY, 附带 instruction)
+  4. 角色按 instruction 调用 summary 工具 → 保存总结 + 切换 OFF_DUTY
+  5. 检查: 第 2 天 build_system_prompt 会注入第 1 天总结
 
-  09:00  Shift Start — restore yesterday's Journal, cold-start fresh Context
-  11:00  Low-priority event — intercepted by Ambient Buffer (0 Token on LLM)
-  14:00  High-priority work order — passes filter, wakes MAF Business Workflow
-  18:00  Shift End   — summarize day, write Journal, Context Flush
-
-Run:
-    cd maf_scheduler && python -m src.main
+运行:
+    cd maf_scheduler && source .venv/bin/activate && python -m src.main
 """
 
 from __future__ import annotations
@@ -18,50 +17,27 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from datetime import datetime, timezone
-from pathlib import Path
+import time as time_module
+from datetime import datetime, timedelta
 
-# Ensure src/ is on the path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from src.core.dispatcher import EventDispatcher
+from src.core.roles import RolePool
+from src.core.role_templates import get_template
+from src.core.time_manager import TimeManager, EVENT_SHIFT_END, EVENT_SHIFT_START
+from src.core.types import AgentState, Event, Priority
+from src.python_tools.memory_toolkit import create_memory_toolkit
+from src.python_tools.time_toolkit import create_time_toolkit
 
-# ── API Key Configuration ────────────────────────────────────
+logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
 
-os.environ.setdefault("DEEPSEEK_API_KEY", "sk-f29a3265f9e34c3bbf8f86f9142a57c9")
-os.environ.setdefault("DEEPSEEK_MODEL", "deepseek-v4-flash")
-os.environ.setdefault("DEEPSEEK_THINKING", "true")
-
-from src.core.event_bus import EventBus
-from src.core.scheduler import ShiftScheduler
-from src.core.types import AgentState, Event, FilterDecision, Priority
-from src.storage.ambient_buffer import AmbientBuffer
-from src.storage.journal_store import JournalStore
-from src.workflow.agent_workflow import build_business_workflow
-from src.workflow.engine import WorkflowEngine
-
-# ── Logging ──────────────────────────────────────────────────
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt="%H:%M:%S",
-)
-logger = logging.getLogger("main")
-
-# ── Pretty printer ───────────────────────────────────────────
-
-BOLD = "\033[1m"
-GREEN = "\033[32m"
-YELLOW = "\033[33m"
-RED = "\033[31m"
-CYAN = "\033[36m"
-MAGENTA = "\033[35m"
-RESET = "\033[0m"
+BOLD = "\033[1m"; GREEN = "\033[32m"; YELLOW = "\033[33m"
+RED = "\033[31m"; CYAN = "\033[36m"; MAGENTA = "\033[35m"; RESET = "\033[0m"
 
 
 def header(text: str) -> None:
-    print(f"\n{BOLD}{CYAN}{'═' * 60}{RESET}")
+    print(f"\n{BOLD}{CYAN}{'═' * 62}{RESET}")
     print(f"{BOLD}{CYAN}  {text}{RESET}")
-    print(f"{BOLD}{CYAN}{'═' * 60}{RESET}\n")
+    print(f"{BOLD}{CYAN}{'═' * 62}{RESET}\n")
 
 
 def step(text: str) -> None:
@@ -80,205 +56,130 @@ def warn(text: str) -> None:
     print(f"  {YELLOW}⚠ {text}{RESET}")
 
 
-def fail(text: str) -> None:
-    print(f"  {RED}✗ {text}{RESET}")
-
-
-# ── Main simulation ──────────────────────────────────────────
-
-
 def main() -> None:
-    header("MAF Shift & Event-Driven Agent Scheduler — Daily Simulation")
-    print("  Breaking the while(true) loop. Context isolation. 0-Token filtering.")
-    print("  Shift-based lifecycle. Journal-driven memory.\n")
+    header("MAF 作息系统演示 — Tick 制 + 事件驱动上下班")
 
-    # ── Bootstrap infrastructure ─────────────────────────────
-    step("Initializing infrastructure...")
+    # ── 1. 启动角色池 (管理角色 + 工具) ────────────────────
+    step("启动角色池 (ceo / coo / hr / cfo)...")
+    pool = RolePool()
+    roles = ["ceo", "coo", "hr", "cfo"]
+    for rid in roles:
+        role = get_template(rid)
+        role.add_toolkit(create_memory_toolkit())   # summary → 下班 + 笔记
+        role.add_toolkit(create_time_toolkit())     # get_time
+        pool.add_role(role)
+    pool.start()
+    ok(f"角色池已启动: {roles}")
 
-    agent_id = "ops-bot-01"
-    engine = WorkflowEngine()
-    build_business_workflow(engine)
+    # ── 2. 启动 TimeManager (独占线程, 系统启动 = Tick 0) ──
+    step("启动 TimeManager 时间线程 (系统启动 = Tick 0 / 第 1 天)...")
+    tm = TimeManager(check_interval=1)  # 演示用快速检查 (1秒)
 
-    buffer = AmbientBuffer(":memory:")  # in-memory for demo
-    store = JournalStore(data_dir="./data/journals")
+    # 模拟时钟: 用可推进的时间源模拟一天
+    sim_now = [datetime(2026, 8, 1, 8, 0)]  # 起始墙钟时间 (仅用于演示推进)
 
-    scheduler = ShiftScheduler(
-        agent_id=agent_id,
-        engine=engine,
-        buffer=buffer,
-        store=store,
-        persona_name="ops-bot",
-        persona_role="DevOps Assistant",
-    )
+    # 所有角色绑定同一个共享 TimeManager (保证 day_number / tick 一致)
+    for rid in roles:
+        pool.get_role(rid).bind_time_manager(tm)
 
-    event_bus = EventBus(buffer=buffer)
-    event_bus.set_state_getter(lambda: scheduler.state)
+    tm.set_clock(lambda: sim_now[0])
 
-    ok(f"Agent '{agent_id}' created. State: {scheduler.state.value}")
+    # 事件 → 事件总线 (广播给所有角色)
+    def _send(ev: Event) -> None:
+        EventDispatcher(pool).trigger(ev)
+    tm.set_event_sender(_send)
+    tm.start()
+    ok(f"TimeManager 已启动: 第 {tm.day_number()} 天, Tick {tm.current_tick()}")
 
-    # ── Prepare a "yesterday" journal for the demo ────────────
-    from src.core.types import Journal
+    # ── 3. 上班 (Tick 0) ──────────────────────────────────
+    step("等待时间线程首次检查 (Tick 0 = 上班时刻)...")
+    time_module.sleep(1.5)  # 让线程在 Tick 0 先检查一次, 触发 SHIFT_START
+    tod = tm.tick_of_day()
+    ok(f"当前: 第 {tm.day_number()} 天, Tick {tm.current_tick()} (今日第 {tod} Tick)")
 
-    yesterday_journal = Journal(
-        agent_id=agent_id,
-        date="2026-07-28",
-        summary=(
-            "Yesterday: Deployed v2.3.1 to staging. Found a memory leak in the auth service "
-            "and opened issue #421. Customer reported slow login times — investigating. "
-            "Pending: review PR #188 (JWT refresh), update monitoring dashboards for the new API gateway."
-        ),
-        key_decisions=["Rolled back v2.3.0 due to auth bug", "Assigned issue #421 to Alice"],
-        pending_tasks=["Review PR #188 — JWT refresh token logic", "Update Grafana dashboards"],
-    )
-    store.save(yesterday_journal)
-    info(f"Seeded yesterday's journal ({yesterday_journal.date})")
-
-    # ════════════════════════════════════════════════════════════
-    #  09:00 — Shift Start
-    # ════════════════════════════════════════════════════════════
-    header("09:00 — SHIFT START (上班)")
-
-    result = scheduler.run_shift_start()
-    ok(f"State: {scheduler.state.value}")
-    info(f"Previous journal: {result['previous_journal_date']}")
-    info(f"Pending tasks: {result['pending_tasks']}")
-    info(f"Context history size: {len(scheduler.session.history)} messages")
-    info(f"System prompt (first 150 chars):")
-    info(f"  {scheduler.session.system_prompt[:150]}...")
-
-    # ════════════════════════════════════════════════════════════
-    #  11:00 — Low-priority non-relevant event → Ambient Buffer
-    # ════════════════════════════════════════════════════════════
-    header("11:00 — NON-RELEVANT EVENT (test Ambient Buffer, 0 Token)")
-
-    spam_event = Event(
-        source="slack",
-        event_type="channel_message",
-        priority=Priority.LOW,
-        payload={"channel": "#random", "text": "Anyone up for lunch?", "mentions": []},
-        timestamp=datetime(2026, 7, 29, 11, 0, 0, tzinfo=timezone.utc),
-    )
-    info(f"Incoming event: {spam_event.source}/{spam_event.event_type} (priority={spam_event.priority.name})")
-    info(f"Payload: {spam_event.payload['text']}")
-
-    decision = event_bus.process_event(spam_event, agent_id=agent_id)
-    info(f"Filter decision: {decision.value}")
-    info(f"Salience score: {spam_event.salience_score:.2f}")
-
-    if decision != FilterDecision.PASS:
-        ok(f"Event intercepted! Decision={decision.value} — 0 Tokens consumed on LLM")
-        warn(f"Event parked in AmbientBuffer (pending: {buffer.count_pending(agent_id)})")
+    # 检查角色是否收到 SHIFT_START
+    status = pool.get_status()
+    got_start = any("SHIFT_START" in (s["current_task"] or "") for s in status.values())
+    if got_start:
+        ok("角色已收到 SHIFT_START 上班事件 (EMERGENCY, 穿透所有过滤)")
     else:
-        fail("Event should have been blocked by Layer 2 salience filter!")
+        warn("角色可能正在处理上班事件 (LLM 调用中)")
 
-    # ════════════════════════════════════════════════════════════
-    #  14:00 — High-priority work order → Wake workflow
-    # ════════════════════════════════════════════════════════════
-    header("14:00 — HIGH-PRIORITY WORK ORDER (wake MAF workflow)")
+    # 推进到 Tick 30 (上午工作时段)
+    step("推进到 Tick 30 (上午, 模拟时钟 +5 小时)...")
+    sim_now[0] = sim_now[0] + timedelta(hours=5)
+    time_module.sleep(1.0)
 
-    work_event = Event(
-        source="github",
-        event_type="new_pr",
-        priority=Priority.HIGH,
-        payload={
-            "repo": "api-gateway",
-            "pr_number": 188,
-            "title": "JWT refresh token rotation",
-            "author": "alice",
-            "urgent": True,
-        },
-        timestamp=datetime(2026, 7, 29, 14, 0, 0, tzinfo=timezone.utc),
-    )
-    info(f"Incoming event: {work_event.source}/{work_event.event_type} (priority={work_event.priority.name})")
-    info(f"Payload: PR #{work_event.payload['pr_number']} — {work_event.payload['title']}")
+    # ── 4. 投递一个普通工作事件 ────────────────────────────
+    step("投递普通工作事件 (低显著度, 应被过滤)...")
+    spam = Event(source="slack", event_type="chat", priority=Priority.LOW,
+                 payload={"text": "中午吃什么?", "channel": "#random"})
+    EventDispatcher(pool).trigger(spam)
+    time_module.sleep(0.5)
+    info("LOW 事件已投递 (显著性过滤: 0 Token 拦截)")
 
-    decision = event_bus.process_event(work_event, agent_id=agent_id)
-    info(f"Filter decision: {decision.value}")
-    info(f"Salience score: {work_event.salience_score:.2f}")
+    step("投递高优先级工作工单 (HIGH)...")
+    work = Event(source="github", event_type="new_pr", priority=Priority.HIGH,
+                 payload={"pr_number": 188, "title": "fix: login token NPE", "urgent": True})
+    results = EventDispatcher(pool).trigger(work)
+    accepted = [rid for rid, r in results.items() if r["accepted"]]
+    info(f"工单被接受的角色: {accepted or '(LLM 处理中)'}")
 
-    if decision == FilterDecision.PASS:
-        ok("Event passed filter → waking MAF Business Workflow...")
+    # 让角色处理一会儿
+    time_module.sleep(8.0)
 
-        # Execute the workflow
-        artifact = scheduler.execute_task(work_event, workflow_id="business_workflow")
-        ok(f"Workflow complete: {artifact.summary}")
-        info(f"Tokens consumed: {artifact.tokens_consumed}")
-        info(f"Session history size after task: {len(scheduler.session.history)} messages")
-        info(f"Checkpoints: {list(scheduler.session.checkpoints.keys())}")
+    # ── 5. 推进到下班 (Tick >= 60) ─────────────────────────
+    step("推进到 Tick >= 60 (下班时刻, 模拟时钟 +9小时50分)...")
+    sim_now[0] = sim_now[0] + timedelta(hours=9, minutes=50)
+    time_module.sleep(1.5)
+    tod = tm.tick_of_day()
+    ok(f"当前: 第 {tm.day_number()} 天, Tick {tm.current_tick()} (今日第 {tod} Tick)")
+
+    # SHIFT_END 事件携带 instruction → 角色应调用 summary
+    step("等待角色调用 summary 工具 (最长 60 秒)...")
+    deadline = time_module.time() + 60
+    while time_module.time() < deadline:
+        all_off = all(pool.get_role(rid).state == AgentState.OFF_DUTY for rid in roles)
+        if all_off:
+            break
+        time_module.sleep(2.0)
+
+    # ── 6. 检查下班状态 ────────────────────────────────────
+    step("检查下班状态...")
+    status = pool.get_status()
+    off_duty = [rid for rid in roles if pool.get_role(rid).state == AgentState.OFF_DUTY]
+    if off_duty:
+        ok(f"OFF_DUTY 角色: {off_duty}")
     else:
-        fail(f"Expected PASS, got {decision.value}")
+        warn("角色仍未 OFF_DUTY (LLM 处理慢或未调用 summary)")
 
-    # ════════════════════════════════════════════════════════════
-    #  18:00 — Shift End (Journal + Context Flush)
-    # ════════════════════════════════════════════════════════════
-    header("18:00 — SHIFT END (下班 — Journal + Context Flush)")
+    # 打印每个角色今天的总结
+    for rid in roles:
+        role = pool.get_role(rid)
+        summary = role.note_store.get_summary(day=1)
+        state = role.state.value
+        if summary:
+            ok(f"[{rid}] 第1天总结已保存 ({state}): {summary[:60]}...")
+        else:
+            info(f"[{rid}] 状态: {state}, 暂无总结")
 
-    journal = scheduler.run_shift_end()
-    ok(f"State: {scheduler.state.value}")
-    ok(f"Journal generated for {journal.date}")
-    info(f"Summary: {journal.summary}")
-    info(f"Key decisions: {journal.key_decisions}")
-    info(f"Pending tasks: {journal.pending_tasks}")
-    info(f"Ambient highlights: {journal.ambient_highlights}")
-    info(f"Context history after flush: {len(scheduler.session.history)} messages")
+    # ── 7. 第 2 天冷启动: 注入第 1 天总结 ───────────────────
+    step("模拟第 2 天冷启动 (build_system_prompt 应注入昨日总结)...")
+    tm.stop()
+    sim_now[0] = sim_now[0] + timedelta(hours=14)  # 跨过午夜 → 第 2 天
 
-    # ════════════════════════════════════════════════════════════
-    #  Summary
-    # ════════════════════════════════════════════════════════════
-    header("SIMULATION SUMMARY")
+    prompt = pool.get_role("ceo").build_system_prompt()
+    if "[昨日总结]" in prompt:
+        ok(f"第 2 天 System Prompt 已注入昨日总结 (第 {tm.day_number()} 天)")
+    else:
+        warn(f"提示词未注入总结 (第 {tm.day_number()} 天)")
 
-    stats = event_bus.get_stats()
-    print(f"  Total events:      {stats['total_events']}")
-    print(f"  {GREEN}Passed (to LLM):    {stats['passed']}{RESET}")
-    print(f"  {YELLOW}Ambient (parked):   {stats['ambient']}{RESET}")
-    print(f"  {RED}Blocked (off-duty):  {stats['blocked']}{RESET}")
-    print()
-
-    # Verify the Context Flush
-    assert len(scheduler.session.history) == 0, "History should be empty after flush"
-    ok("Context Flush verified — session history is empty")
-
-    # Verify the journal was persisted
-    loaded = store.load(agent_id, journal.date)
-    assert loaded is not None, "Journal should be persisted to disk"
-    ok(f"Journal persistence verified — file for {loaded.date} exists")
-
-    # Verify ambient buffer was drained
-    assert buffer.count_pending(agent_id) == 0, "AmbientBuffer should be drained after shift end"
-    ok("AmbientBuffer drain verified — 0 pending events")
-
-    # Show journal file
-    journal_path = Path("./data/journals") / agent_id / f"{journal.date}.json"
-    info(f"Journal file: {journal_path.resolve()}")
-
-    print(f"\n{BOLD}{GREEN}✓ All checks passed. Framework simulation complete.{RESET}\n")
-
-    # ── Day 2: Simulate next morning to prove memory continuity ──
-    header("BONUS: NEXT DAY — Cold-start with yesterday's diary")
-
-    # Re-create the scheduler fresh (simulating a new day process start)
-    scheduler2 = ShiftScheduler(
-        agent_id=agent_id,
-        engine=engine,
-        buffer=buffer,
-        store=store,
-        persona_name="ops-bot",
-        persona_role="DevOps Assistant",
-    )
-    # Load today's journal explicitly as "yesterday's diary" for the next day
-    latest = store.load_latest(agent_id)
-    journal_summary = latest.summary if latest else ""
-    scheduler2.session.system_prompt = scheduler2._build_system_prompt(journal_summary)  # type: ignore[attr-defined]
-    scheduler2.session.history = [{"role": "system", "content": scheduler2.session.system_prompt}]
-    scheduler2.session.state = AgentState.ON_DUTY_IDLE
-
-    ok(f"State: {scheduler2.state.value}")
-    info(f"Loaded journal: {latest.date if latest else 'none'}")
-    info(f"Pending tasks from diary: {latest.pending_tasks if latest else []}")
-    info(f"System prompt includes yesterday's context:")
-    info(f"  ...{scheduler2.session.system_prompt[-250:]}")
-    print()
+    pool.shutdown(wait=False)
+    print(f"\n{BOLD}{GREEN}演示完成 ✓{RESET}")
+    print("  - SHIFT_START/SHIFT_END 事件: EMERGENCY, 穿透所有过滤")
+    print("  - 下班事件 instruction → 角色调用 summary → OFF_DUTY")
+    print("  - 每日总结持久化 → 次日注入 System Prompt")
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

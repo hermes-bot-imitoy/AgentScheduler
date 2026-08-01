@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import date
 from pathlib import Path
 from typing import Optional
 
@@ -116,52 +115,55 @@ class NoteStore:
             return True
         return False
 
-    # ── 每日总结 (作息系统) ───────────────────────────────
+    # ── 每日总结 (作息系统, 按天序号存储) ─────────────────
 
-    def save_summary(self, content: str, summary_date: Optional[str] = None) -> str:
+    def save_summary(self, content: str, day: Optional[int] = None) -> str:
         """保存某一天的总结.
 
         参数:
-            content:      总结内容
-            summary_date: 日期 (ISO 格式, 默认今天)
+            content: 总结内容
+            day:     第几天 (默认 1)
 
         返回:
             保存路径.
         """
-        d = summary_date or date.today().isoformat()
-        path = self._dir / f"_summary_{d}.md"
+        d = day or 1
+        path = self._dir / f"_summary_day_{d}.md"
         path.write_text(content, encoding="utf-8")
-        logger.info("[%s] 当日总结已保存: %s", self.role_id, path.name)
+        logger.info("[%s] 第 %d 天总结已保存: %s", self.role_id, d, path.name)
         return str(path)
 
-    def get_summary(self, summary_date: Optional[str] = None) -> Optional[str]:
-        """读取指定日期的总结.
+    def get_summary(self, day: Optional[int] = None) -> Optional[str]:
+        """读取指定天的总结.
 
         参数:
-            summary_date: 日期 (ISO 格式, 默认今天)
+            day: 第几天 (默认 1)
 
         返回:
             总结内容, 不存在返回 None.
         """
-        d = summary_date or date.today().isoformat()
-        path = self._dir / f"_summary_{d}.md"
+        d = day or 1
+        path = self._dir / f"_summary_day_{d}.md"
         if not path.exists():
             return None
         return path.read_text(encoding="utf-8")
 
-    def get_latest_summary(self, before_date: Optional[str] = None) -> Optional[str]:
+    def get_latest_summary(self, before_day: Optional[int] = None) -> Optional[str]:
         """读取最近一次总结 (用于下一天冷启动).
 
         参数:
-            before_date: 截止日期 (只找严格早于该日期的总结, 默认不限)
+            before_day: 截止天数 (只找严格早于该天的总结, 默认不限)
 
         返回:
             最近总结内容, 没有则返回 None.
         """
-        candidates = sorted(self._dir.glob("_summary_*.md"), reverse=True)
+        candidates = sorted(self._dir.glob("_summary_day_*.md"), reverse=True)
         for p in candidates:
-            # 文件名格式: _summary_YYYY-MM-DD.md
-            d = p.name[len("_summary_"):-len(".md")]
-            if before_date is None or d < before_date:
+            # 文件名格式: _summary_day_<N>.md
+            try:
+                d = int(p.name[len("_summary_day_"):-len(".md")])
+            except ValueError:
+                continue
+            if before_day is None or d < before_day:
                 return p.read_text(encoding="utf-8")
         return None

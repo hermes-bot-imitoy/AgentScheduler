@@ -1,21 +1,22 @@
 """时间管理器 (TimeManager) — 以 Tick 为单位的作息时间.
 
 规则:
-  - 1 Tick = 10 分钟
-  - Tick 0  = 上班 (默认 09:00)
-  - Tick 60 = 下班 (默认 19:00)
-  - 上班前为负 Tick, 下班后超过 60 Tick
+  - 系统开始运行即为 Tick 0, 不依赖墙钟时间
+  - 1 Tick = 10 分钟 (可配置)
+  - 每天 = ticks_per_day 个 Tick (默认 144 = 24 小时), 系统启动当天为第 1 天
+  - 每个工作日的 Tick 0 上班 (shift_start), Tick 60 下班 (shift_end)
 
-事件触发:
-  - Tick 到达 0   → 发送 shift_start 事件 (优先级 NORMAL)
-  - Tick 到达 60  → 发送 shift_end   事件 (优先级 NORMAL)
-  - TimeManager 独占一个后台线程, 周期性检查 Tick 并触发事件
+事件触发 (独占后台线程):
+  - 每天第 0 Tick   → 发送 SHIFT_START 事件 (优先级 EMERGENCY)
+  - 每天第 60 Tick  → 发送 SHIFT_END   事件 (优先级 EMERGENCY)
+  - SHIFT_END 的 instruction 提示角色调用 summary 工具总结并下班
 
 用法:
     tm = TimeManager()
     tm.set_event_sender(bus.process_event)   # 设置事件发送回调
-    tm.start()                                # 启动时间线程
-    tick = tm.current_tick()                  # 当前 Tick
+    tm.start()                                # 启动时间线程 (记录启动时刻 = Tick 0)
+    tick = tm.current_tick()                  # 当前 Tick (自启动累计)
+    day = tm.day_number()                     # 当前第几天 (从 1 开始)
     tm.stop()                                 # 停止线程
 """
 
@@ -25,19 +26,22 @@ import logging
 import threading
 import time as time_module
 from dataclasses import dataclass, field
-from datetime import datetime, time
-from typing import Any, Callable, Optional
+from datetime import datetime
+from typing import Callable, Optional
 
 from src.core.types import Event, Priority
 
 logger = logging.getLogger(__name__)
 
-# ── 作息关键事件 ──────────────────────────────────────────
+# ── 作息关键事件 (大写统一) ─────────────────────────────────
 
-TICK_SHIFT_START = 0    # 上班事件: Tick 0
-TICK_SHIFT_END = 60     # 下班事件: Tick 60
+EVENT_SHIFT_START = "SHIFT_START"   # 上班事件
+EVENT_SHIFT_END = "SHIFT_END"       # 下班事件
 
-MINUTES_PER_TICK = 10   # 每 Tick 10 分钟
+MINUTES_PER_TICK = 10       # 每 Tick 10 分钟
+TICKS_PER_DAY = 144         # 每天 144 Tick (24 小时)
+SHIFT_START_TICK = 0        # 上班: 每天第 0 Tick
+SHIFT_END_TICK = 60         # 下班: 每天第 60 Tick (10 小时工作制)
 
 DEFAULT_CHECK_INTERVAL = 30  # 线程检查间隔 (秒)
 
@@ -46,44 +50,32 @@ DEFAULT_CHECK_INTERVAL = 30  # 线程检查间隔 (秒)
 class TimeManager:
     """以 Tick 为单位的作息时间管理器.
 
+    系统启动时刻记为 Tick 0 / 第 1 天, 之后按 elapsed 时间推进 Tick,
+    不依赖任何硬编码的墙钟时间.
+
     参数:
-        day_start: 上班时间 "HH:MM" (默认 09:00, 对应 Tick 0)
-        day_end:   下班时间 "HH:MM" (默认 19:00, 对应 Tick 60)
-        check_interval: 时间线程检查间隔 (秒, 默认 30)
+        minutes_per_tick: 每个 Tick 的分钟数 (默认 10)
+        shift_start_tick: 上班 Tick (默认 0)
+        shift_end_tick:   下班 Tick (默认 60)
+        ticks_per_day:    每天总 Tick 数 (默认 144)
+        check_interval:   时间线程检查间隔秒数 (默认 30)
     """
 
-    day_start: str = "09:00"
-    day_end: str = "19:00"
+    minutes_per_tick: int = MINUTES_PER_TICK
+    shift_start_tick: int = SHIFT_START_TICK
+    shift_end_tick: int = SHIFT_END_TICK
+    ticks_per_day: int = TICKS_PER_DAY
     check_interval: int = DEFAULT_CHECK_INTERVAL
 
-    # 内部状态 (不参与 dataclass 比较)
-    _start: Optional[time] = field(default=None, repr=False, init=False)
-    _end: Optional[time] = field(default=None, repr=False, init=False)
+    # 内部状态
+    _start_dt: Optional[datetime] = field(default=None, repr=False, init=False)  # 启动时刻
     _thread: Optional[threading.Thread] = field(default=None, repr=False, init=False)
     _running: bool = field(default=False, repr=False, init=False)
     _event_sender: Optional[Callable[[Event], None]] = field(default=None, repr=False, init=False)
     _clock: Callable[[], datetime] = field(default=datetime.now, repr=False, init=False)
+    _fired_day: int = field(default=0, repr=False, init=False)      # 已触发事件的天
     _fired_start: bool = field(default=False, repr=False, init=False)
     _fired_end: bool = field(default=False, repr=False, init=False)
-
-    def __post_init__(self):
-        self._start = self._parse(self.day_start)
-        self._end = self._parse(self.day_end)
-        # 工作日总 Tick 数 = (下班-上班)分钟 / 10
-        self.total_ticks = (self._minutes(self._end) - self._minutes(self._start)) // MINUTES_PER_TICK
-        if self.total_ticks != TICK_SHIFT_END:
-            logger.info("TimeManager: 自定义作息 %s-%s → %d Ticks (默认 60)", self.day_start, self.day_end, self.total_ticks)
-
-    # ── 静态工具 ──────────────────────────────────────────
-
-    @staticmethod
-    def _parse(hhmm: str) -> time:
-        h, m = hhmm.split(":")
-        return time(int(h), int(m))
-
-    @staticmethod
-    def _minutes(t: time) -> int:
-        return t.hour * 60 + t.minute
 
     # ── 配置 ──────────────────────────────────────────────
 
@@ -105,101 +97,115 @@ class TimeManager:
 
     # ── 核心方法 ──────────────────────────────────────────
 
-    def current_tick(self, now: datetime | None = None) -> int:
-        """获取当前 Tick.
+    def _elapsed_seconds(self) -> float:
+        """自系统启动以来的秒数 (基于注入时钟)."""
+        if self._start_dt is None:
+            return 0.0
+        return max(0.0, (self._clock() - self._start_dt).total_seconds())
 
-        参数:
-            now: 指定时间 (默认使用注入的时钟).
+    def current_tick(self) -> int:
+        """获取当前 Tick 数 (自系统启动累计, 启动即为 0).
 
         返回:
-            当前 Tick 数. 上班前为负, 下班后超过 total_ticks.
+            当前 Tick 数.
         """
-        now = now or self._clock()
-        assert self._start is not None, "TimeManager 未初始化"
-        minutes_since_start = (now.hour * 60 + now.minute) - self._minutes(self._start)
-        return minutes_since_start // MINUTES_PER_TICK
+        return int(self._elapsed_seconds() // (self.minutes_per_tick * 60))
+
+    def day_number(self) -> int:
+        """获取当前是第几天 (系统启动当天为第 1 天).
+
+        返回:
+            天序号 (>= 1).
+        """
+        return int(self._elapsed_seconds() // (self.ticks_per_day * self.minutes_per_tick * 60)) + 1
+
+    def tick_of_day(self) -> int:
+        """获取今天内的 Tick 位置 (0 ~ ticks_per_day-1).
+
+        返回:
+            今日内 Tick 数.
+        """
+        return self.current_tick() % self.ticks_per_day
 
     def tick_to_time(self, tick: int) -> str:
-        """将 Tick 转换为 "HH:MM" 时间字符串.
-
-        参数:
-            tick: Tick 数 (可为负或超过总 Tick 数).
-
-        返回:
-            对应的时间字符串.
-        """
-        assert self._start is not None, "TimeManager 未初始化"
-        total_minutes = self._minutes(self._start) + tick * MINUTES_PER_TICK
-        total_minutes %= 24 * 60  # 支持跨天
-        h, m = divmod(total_minutes, 60)
-        return f"{h:02d}:{m:02d}"
-
-    def is_working_hours(self, now: datetime | None = None) -> bool:
-        """判断当前是否在上班时间内 (0 <= Tick <= total_ticks).
-
-        参数:
-            now: 指定时间 (默认使用注入的时钟).
-
-        返回:
-            True 表示在上班时间内.
-        """
-        tick = self.current_tick(now)
-        return TICK_SHIFT_START <= tick <= self.total_ticks
-
-    # ── 作息事件 ─────────────────────────────────────────
-
-    def get_shift_event(self, tick: int) -> str | None:
-        """获取某个 Tick 对应的作息事件.
+        """将 Tick 转换为相对时钟 "HH:MM" (从每天第 0 Tick 起算).
 
         参数:
             tick: Tick 数.
 
         返回:
-            "SHIFT_START" (上班) / "SHIFT_END" (下班) / None (普通时间).
+            相对时钟字符串, 如 tick 30 → "05:00", tick 60 → "10:00".
         """
-        if tick >= TICK_SHIFT_START and tick < self.total_ticks:
-            return "SHIFT_START" if tick == TICK_SHIFT_START else None
-        if tick >= self.total_ticks:
-            return "SHIFT_END"
-        return None
+        total_minutes = tick * self.minutes_per_tick
+        total_minutes %= 24 * 60
+        h, m = divmod(total_minutes, 60)
+        return f"{h:02d}:{m:02d}"
 
-    def describe(self, now: datetime | None = None) -> str:
-        """返回当前作息状态的文字描述 (供工具/提示词使用).
-
-        参数:
-            now: 指定时间 (默认使用注入的时钟).
+    def is_working_hours(self) -> bool:
+        """判断当前是否在上班时间内 (今日 Tick 在 [shift_start, shift_end) 之间).
 
         返回:
-            作息状态描述字符串.
+            True 表示在上班时间内.
         """
-        now = now or self._clock()
-        tick = self.current_tick(now)
-        clock = now.strftime("%H:%M")
-        if tick < TICK_SHIFT_START:
-            return f"当前时间 {clock}, Tick {tick} (上班前, 距上班还有 {-tick} Ticks)"
-        if tick >= self.total_ticks:
-            return f"当前时间 {clock}, Tick {tick} (已下班 {tick - self.total_ticks} Ticks)"
-        return f"当前时间 {clock}, Tick {tick} (上班中, 距下班还有 {self.total_ticks - tick} Ticks)"
+        tod = self.tick_of_day()
+        return self.shift_start_tick <= tod < self.shift_end_tick
+
+    def ticks_until_shift_end(self) -> int:
+        """距下班还有多少 Tick (已下班返回 0)."""
+        return max(0, self.shift_end_tick - self.tick_of_day())
+
+    # ── 作息事件 ─────────────────────────────────────────
+
+    def get_shift_event(self, tick_of_day: int) -> Optional[str]:
+        """获取今日某个 Tick 位置对应的作息事件.
+
+        参数:
+            tick_of_day: 今日内 Tick 位置.
+
+        返回:
+            "SHIFT_START" (上班) / "SHIFT_END" (下班) / None (普通时间).
+        """
+        if tick_of_day == self.shift_start_tick:
+            return EVENT_SHIFT_START
+        if tick_of_day >= self.shift_end_tick:
+            return EVENT_SHIFT_END
+        return None
+
+    def describe(self) -> str:
+        """返回当前作息状态的文字描述 (供工具/提示词使用).
+
+        返回:
+            状态描述字符串: 第几天, Tick 数, 上班/下班状态.
+        """
+        tick = self.current_tick()
+        day = self.day_number()
+        tod = self.tick_of_day()
+        if tod >= self.shift_end_tick:
+            return f"第 {day} 天, Tick {tick} (已下班 {tod - self.shift_end_tick} Ticks)"
+        return f"第 {day} 天, Tick {tick} (上班中, 距下班还有 {self.shift_end_tick - tod} Ticks)"
 
     # ── 时间线程 (独占) ───────────────────────────────────
 
     def start(self) -> None:
         """启动时间线程 (独占线程, 周期性检查 Tick 并触发作息事件).
 
-        触发规则:
-          - 首次检测到 Tick >= 0  → 发送 shift_start 事件
-          - 首次检测到 Tick >= 60 → 发送 shift_end 事件
+        系统启动时刻记为 Tick 0 / 第 1 天:
+          - 每天首次检测到今日 Tick == shift_start_tick → 发送 SHIFT_START
+          - 每天首次检测到今日 Tick >= shift_end_tick   → 发送 SHIFT_END
         """
         if self._running:
             return
+        self._start_dt = self._clock()
         self._running = True
+        self._fired_day = 0
         self._fired_start = False
         self._fired_end = False
         self._thread = threading.Thread(
             target=self._tick_loop, name="time-manager", daemon=True,
         )
         self._thread.start()
-        logger.info("TimeManager 时间线程已启动 (检查间隔 %ds)", self.check_interval)
+        logger.info("TimeManager 时间线程已启动 (启动时刻 = Tick 0 / 第 1 天, 检查间隔 %ds)",
+                    self.check_interval)
 
     def stop(self) -> None:
         """停止时间线程."""
@@ -227,38 +233,60 @@ class TimeManager:
         logger.debug("TimeManager 线程循环结束")
 
     def _check_and_fire(self) -> None:
-        """检查当前 Tick 并触发对应事件 (线程安全)."""
-        tick = self.current_tick()
+        """检查当前 Tick 并触发对应事件 (按天重置, 每天各触发一次)."""
+        day = self.day_number()
+        tod = self.tick_of_day()
 
-        # Tick 0: 上班事件 (进入工作时段后触发一次)
-        if not self._fired_start and tick >= TICK_SHIFT_START and tick < self.total_ticks:
+        # 新的一天 → 重置当天的事件标志
+        if day != self._fired_day:
+            self._fired_day = day
+            self._fired_start = False
+            self._fired_end = False
+            logger.info("TimeManager: 进入第 %d 天", day)
+
+        # 上班事件 (每天第 0 Tick 触发一次)
+        if not self._fired_start and tod == self.shift_start_tick:
             self._fired_start = True
-            self._fire_event("shift_start", tick)
+            self._fire_event(EVENT_SHIFT_START)
 
-        # Tick 60: 下班事件 (到达或超过下班点后触发一次)
-        if not self._fired_end and tick >= self.total_ticks:
+        # 下班事件 (每天达到 shift_end_tick 后触发一次)
+        if not self._fired_end and tod >= self.shift_end_tick:
             self._fired_end = True
-            self._fire_event("shift_end", tick)
+            self._fire_event(EVENT_SHIFT_END)
 
-    def _fire_event(self, event_type: str, tick: int) -> None:
+    def _fire_event(self, event_type: str) -> None:
         """构造并发送作息事件到事件总线.
 
         参数:
-            event_type: "shift_start" 或 "shift_end"
-            tick: 触发时的 Tick 数
+            event_type: "SHIFT_START" 或 "SHIFT_END"
         """
+        tick = self.current_tick()
+        day = self.day_number()
+        tod = self.tick_of_day()
+
+        # 下班事件附带指示: 角色应调用 summary 工具总结并进入 OFF_DUTY
+        if event_type == EVENT_SHIFT_END:
+            instruction = (
+                "下班时间到: 请调用 summary 工具总结今天的工作, "
+                "总结完成后你将自动进入 OFF_DUTY 状态."
+            )
+        else:
+            instruction = "上班时间到: 查看昨日总结, 开始今天的工作."
+
         event = Event(
             source="time",
             event_type=event_type,
-            priority=Priority.NORMAL,
+            priority=Priority.EMERGENCY,  # 作息事件必须能穿透所有过滤
             payload={
                 "tick": tick,
-                "time": self.tick_to_time(tick),
+                "day": day,
+                "time": self.tick_to_time(tod),
                 "shift": event_type,
+                "instruction": instruction,
             },
         )
-        logger.info("TimeManager 触发事件: %s (tick=%d, time=%s, priority=%s)",
-                    event_type, tick, event.payload["time"], event.priority.name)
+        logger.info("TimeManager 触发事件: %s (day=%d, tick=%d, time=%s, priority=%s)",
+                    event_type, day, tick, event.payload["time"], event.priority.name)
 
         if self._event_sender is not None:
             try:

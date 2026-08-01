@@ -188,8 +188,8 @@ class AgentRole:
         if self.system_prompt_extra:
             parts.append(self.system_prompt_extra)
 
-        # 注入昨日总结 (如果有) — 作息系统记忆
-        summary = self.get_latest_summary()
+        # 注入昨日总结 (如果有) — 只注入严格早于今天(day)的总结
+        summary = self.get_latest_summary(before_day=self.time_manager.day_number())
         if summary:
             parts.append(f"\n[昨日总结]\n{summary}\n(以上是昨天的总结, 供你延续工作.)")
 
@@ -247,16 +247,16 @@ class AgentRole:
             self._note_store = NoteStore(role_id=self.role_id)
         return self._note_store
 
-    def get_latest_summary(self, before_date: Optional[str] = None) -> Optional[str]:
+    def get_latest_summary(self, before_day: Optional[int] = None) -> Optional[str]:
         """读取该角色最近一次的每日总结 (用于下一天冷启动提示词).
 
         参数:
-            before_date: 截止日期 (ISO 格式, 可选).
+            before_day: 截止天数 (只找严格早于该天的总结, 可选).
 
         返回:
             最近总结内容, 没有则返回 None.
         """
-        return self.note_store.get_latest_summary(before_date)
+        return self.note_store.get_latest_summary(before_day)
 
     # ── Time manager (作息时间) ───────────────────────────
 
@@ -264,12 +264,20 @@ class AgentRole:
     def time_manager(self) -> Any:
         """获取该角色的作息时间管理器 (惰性初始化).
 
-        以 Tick 为单位: 1 Tick = 10 分钟, Tick 0 = 上班, Tick 60 = 下班.
+        以 Tick 为单位: 1 Tick = 10 分钟, 系统启动 = Tick 0 / 第 1 天.
         """
         if self._time_manager is None:
             from src.core.time_manager import TimeManager
             self._time_manager = TimeManager()
         return self._time_manager
+
+    def bind_time_manager(self, tm: Any) -> None:
+        """绑定共享 TimeManager (所有角色共用同一个时间源).
+
+        参数:
+            tm: TimeManager 实例.
+        """
+        self._time_manager = tm
 
     # ── MCP & Python Tool Management ────────────────────────
 
@@ -297,10 +305,10 @@ class AgentRole:
         if self._tools is None:
             self._tools = ToolRegistry()
 
-        # 记忆工具类自动绑定该角色的 NoteStore (内容按角色隔离)
+        # 记忆工具类自动绑定该角色的 NoteStore (内容按角色隔离) + 角色引用 (summary 后切 OFF_DUTY)
         if toolkit.name == "memory":
             from src.python_tools.memory_toolkit import bind_store_to_toolkit
-            bind_store_to_toolkit(toolkit, self.note_store)
+            bind_store_to_toolkit(toolkit, self.note_store, role=self)
 
         # 时间工具类自动绑定该角色的 TimeManager (作息时间)
         if toolkit.name == "time":
