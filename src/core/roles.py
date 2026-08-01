@@ -114,6 +114,10 @@ class AgentRole:
             if event.priority < Priority.EMERGENCY:
                 return False, f"Role {self.name} is {self.state.value}"
 
+        # 系统时间事件 (source=time, 如 shift_start/shift_end) 绕过内容显著性过滤
+        if event.source == "time":
+            return True, f"系统时间事件: {event.event_type} (tick={event.payload.get('tick')})"
+
         # Layer 2: Salience — keyword-based relevance per role
         relevance = 0.25  # base
         payload_text = str(event.payload).lower()
