@@ -163,6 +163,41 @@ maf_scheduler/
 
 ## 快速开始
 
+### 方式一: AgentSystem 一键启动 (推荐)
+
+```python
+from src.core.agent_system import AgentSystem
+from src.core.types import Event, Priority
+
+# 统一管理 TimeManager + RolePool + 事件总线
+system = AgentSystem(role_ids=["ceo", "coo", "hr", "cfo"])
+system.start()                       # 启动角色线程 + 时间线程 (Tick 0 / 第 1 天)
+
+# 投递事件 (SHIFT_START/SHIFT_END 由时间线程自动触发)
+system.trigger(Event(source="github", event_type="new_pr",
+                     priority=Priority.HIGH, payload={"pr_number": 188}))
+
+print(system.describe())             # 第 X 天, Tick Y (上班中/已下班)
+system.stop()
+```
+
+### 方式二: 手动组合
+
+```python
+from src.core.dispatcher import EventDispatcher
+from src.core.roles import RolePool
+from src.core.role_templates import get_template
+from src.core.time_manager import TimeManager
+
+pool = RolePool()
+pool.add_role(get_template("ceo"))
+
+tm = TimeManager()
+tm.set_event_sender(lambda ev: EventDispatcher(pool).trigger(ev))
+tm.start()
+pool.start()
+```
+
 ```bash
 cd maf_scheduler
 source .venv/bin/activate

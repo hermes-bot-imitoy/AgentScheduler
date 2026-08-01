@@ -474,6 +474,10 @@ class RolePool:
             raise KeyError(f"Role '{name}' not found. Available: {list(self._roles)}")
         return self._roles[name]
 
+    def all_roles(self) -> list[AgentRole]:
+        """返回所有角色列表 (按注册顺序)."""
+        return list(self._roles.values())
+
     def list_roles(self) -> list[str]:
         return list(self._roles)
 
