@@ -93,6 +93,7 @@ class AgentRole:
     _tools: Any = field(default=None, repr=False, init=False)  # ToolRegistry, lazy init
     _pool: Any = field(default=None, repr=False, init=False)   # RolePool back-reference for talk
     _note_store: Any = field(default=None, repr=False, init=False)  # NoteStore, lazy init
+    _time_manager: Any = field(default=None, repr=False, init=False)  # TimeManager, lazy init
 
     # Callbacks
     on_task_start: Optional[Callable[[AgentRole, Task], None]] = field(default=None, repr=False, init=False)
@@ -169,7 +170,11 @@ class AgentRole:
     # ── Persona ────────────────────────────────────────────
 
     def build_system_prompt(self) -> str:
-        """Construct the role's full system prompt from persona fields."""
+        """构建角色完整 System Prompt.
+
+        组合: 人名, 职位, 职责, 性格, 技能, 额外提示.
+        如果存在昨日总结 (NoteStore), 自动注入到提示词中.
+        """
         parts = [
             f"你是 {self.name}，职位是 {self.title}，负责 {self.role_id} 工作。",
             f"性格特点：{self.personality}。",
@@ -178,6 +183,12 @@ class AgentRole:
             parts.append(f"技能：{', '.join(self.skills)}。")
         if self.system_prompt_extra:
             parts.append(self.system_prompt_extra)
+
+        # 注入昨日总结 (如果有) — 作息系统记忆
+        summary = self.get_latest_summary()
+        if summary:
+            parts.append(f"\n[昨日总结]\n{summary}\n(以上是昨天的总结, 供你延续工作.)")
+
         return "\n".join(parts)
 
     # ── Queue operations (thread-safe) ─────────────────────
@@ -243,6 +254,19 @@ class AgentRole:
         """
         return self.note_store.get_latest_summary(before_date)
 
+    # ── Time manager (作息时间) ───────────────────────────
+
+    @property
+    def time_manager(self) -> Any:
+        """获取该角色的作息时间管理器 (惰性初始化).
+
+        以 Tick 为单位: 1 Tick = 10 分钟, Tick 0 = 上班, Tick 60 = 下班.
+        """
+        if self._time_manager is None:
+            from src.core.time_manager import TimeManager
+            self._time_manager = TimeManager()
+        return self._time_manager
+
     # ── MCP & Python Tool Management ────────────────────────
 
     def add_mcp_tool(
@@ -273,6 +297,11 @@ class AgentRole:
         if toolkit.name == "memory":
             from src.python_tools.memory_toolkit import bind_store_to_toolkit
             bind_store_to_toolkit(toolkit, self.note_store)
+
+        # 时间工具类自动绑定该角色的 TimeManager (作息时间)
+        if toolkit.name == "time":
+            from src.python_tools.time_toolkit import bind_time_to_toolkit
+            bind_time_to_toolkit(toolkit, self.time_manager)
 
         return self._tools.add_toolkit(toolkit)
 
