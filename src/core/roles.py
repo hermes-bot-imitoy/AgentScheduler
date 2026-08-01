@@ -92,6 +92,7 @@ class AgentRole:
     _llm: Optional[DeepSeekLLM] = field(default=None, repr=False, init=False)
     _tools: Any = field(default=None, repr=False, init=False)  # ToolRegistry, lazy init
     _pool: Any = field(default=None, repr=False, init=False)   # RolePool back-reference for talk
+    _note_store: Any = field(default=None, repr=False, init=False)  # NoteStore, lazy init
 
     # Callbacks
     on_task_start: Optional[Callable[[AgentRole, Task], None]] = field(default=None, repr=False, init=False)
@@ -218,6 +219,30 @@ class AgentRole:
     def is_busy(self) -> bool:
         return self._current_task is not None
 
+    # ── Note store (per-role file storage) ─────────────────
+
+    @property
+    def note_store(self) -> Any:
+        """获取该角色的笔记存储实例 (惰性初始化, 按 role_id 隔离).
+
+        每个角色独立目录: data/notes/<role_id>/.
+        """
+        if self._note_store is None:
+            from src.core.note_store import NoteStore
+            self._note_store = NoteStore(role_id=self.role_id)
+        return self._note_store
+
+    def get_latest_summary(self, before_date: Optional[str] = None) -> Optional[str]:
+        """读取该角色最近一次的每日总结 (用于下一天冷启动提示词).
+
+        参数:
+            before_date: 截止日期 (ISO 格式, 可选).
+
+        返回:
+            最近总结内容, 没有则返回 None.
+        """
+        return self.note_store.get_latest_summary(before_date)
+
     # ── MCP & Python Tool Management ────────────────────────
 
     def add_mcp_tool(
@@ -238,18 +263,17 @@ class AgentRole:
         self._tools.add_tool(name, description, input_schema, handler)
 
     def add_toolkit(self, toolkit: Any) -> int:
-        """Import an entire ToolKit (collection of related tools).
-
-        Args:
-            toolkit: A ToolKit instance (from src.core.tools)
-
-        Returns:
-            Number of new tools added (skips duplicates).
-        """
+        """导入整个工具类. 参数：toolkit=ToolKit实例. 返回新增工具数（跳过重复）."""
         from src.core.tools import ToolRegistry
 
         if self._tools is None:
             self._tools = ToolRegistry()
+
+        # 记忆工具类自动绑定该角色的 NoteStore (内容按角色隔离)
+        if toolkit.name == "memory":
+            from src.python_tools.memory_toolkit import bind_store_to_toolkit
+            bind_store_to_toolkit(toolkit, self.note_store)
+
         return self._tools.add_toolkit(toolkit)
 
     @property
