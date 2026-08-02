@@ -59,6 +59,11 @@ def main() -> None:
     system = AgentSystem(role_ids=["ceo", "coo", "hr", "cfo"], check_interval=1)
     ok(f"角色已注册: {system.pool.list_roles()}")
 
+    # 只有 CEO 拥有与甲方(用户)交流的工具
+    from src.python_tools.client_toolkit import create_client_toolkit
+    system.get_role("ceo").add_toolkit(create_client_toolkit())
+    ok("CEO 已装备 talk_to_client 工具 (与甲方实时交流)")
+
     # 模拟时钟: 可推进的时间源 (仅用于演示, 生产环境用真实时间)
     sim_now = [datetime(2026, 8, 1, 8, 0)]
     system.time_manager.set_clock(lambda: sim_now[0])
@@ -74,6 +79,16 @@ def main() -> None:
     ok(f"当前: {system.describe()}")
     states = {rid: system.get_role(rid).state.value for rid in system.pool.list_roles()}
     info(f"角色状态: {states}")
+
+    # ── 3.5 CEO 与甲方交流 (talk_to_client) ────────────────
+    step("向 CEO 投递定向任务: 与甲方交流收集今天的需求...")
+    system.trigger(Event(
+        source="client", event_type="requirements", priority=Priority.HIGH,
+        target_role="ceo",
+        payload={"instruction": "与甲方交流, 收集今天最需要处理的一项需求."},
+    ))
+    info("请在上方 [甲方] 提示处输入需求 (例如: 帮我开发一个支付系统)")
+    time_module.sleep(3.0)  # 等待 CEO 调用工具 (用户输入后继续)
 
     # ── 4. 工作事件 ────────────────────────────────────────
     step("投递 LOW 事件 (午餐闲聊, 应被显著性过滤)...")
