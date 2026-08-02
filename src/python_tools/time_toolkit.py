@@ -67,10 +67,13 @@ def create_time_toolkit() -> ToolKit:
         if manager is None:
             raise RuntimeError("时间工具类尚未绑定 TimeManager, 请通过 role.add_toolkit() 注册")
 
+        raw = args.get("ticks")
+        if raw is None:
+            return "错误: 'ticks' 是必填参数, 必须是整数 (休息的 Tick 数)."
         try:
-            ticks = int(args.get("ticks", 1))
+            ticks = int(raw)
         except (TypeError, ValueError):
-            return "错误: 'ticks' 必须是整数 (休息的 Tick 数)."
+            return "错误: 'ticks' 是必填参数, 必须是整数 (休息的 Tick 数)."
         if not (1 <= ticks <= 60):
             return "错误: 'ticks' 必须在 1~60 范围内."
 
