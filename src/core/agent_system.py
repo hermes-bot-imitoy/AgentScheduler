@@ -30,6 +30,7 @@ from src.core.role_templates import DEFAULT_ROLES, get_template
 from src.core.time_manager import EVENT_SHIFT_START, TimeManager
 from src.core.types import AgentState, Event
 from src.python_tools.memory_toolkit import create_memory_toolkit
+from src.python_tools.task_toolkit import create_task_toolkit
 from src.python_tools.time_toolkit import create_time_toolkit
 
 logger = logging.getLogger(__name__)
@@ -83,10 +84,11 @@ class AgentSystem:
         # 绑定共享时间源 (角色 get_time / summary 取到同一时间)
         role.bind_time_manager(self.time_manager)
 
-        # 自动注册作息工具 (memory: 总结/笔记; time: get_time)
+        # 自动注册作息工具 (memory: 总结/笔记; time: get_time; task: 定时任务)
         if self.auto_toolkits:
             role.add_toolkit(create_memory_toolkit())
             role.add_toolkit(create_time_toolkit())
+            role.add_toolkit(create_task_toolkit())
 
         self.pool.add_role(role)
         logger.info("AgentSystem: 角色已注册 %s (%s)", role.role_id, role.name)

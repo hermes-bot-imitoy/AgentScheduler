@@ -47,10 +47,11 @@ class EventDispatcher:
 
 # # 触发事件广播. 返回{role_id: {accepted, reason, task_id}}. 每个角色调用evaluate_event()
     def trigger(self, event: Event) -> dict[str, dict[str, Any]]:
-        """Fan out an event to ALL roles.
+        """Fan out an event to roles.
 
-        Each role runs its own Layer 1-3 filter. Roles that pass get
-        the event converted to a Task and inserted into their queue.
+        - 广播事件 (target_role=None): 所有角色各自运行 Layer 1-3 过滤.
+        - 定向事件 (target_role=xxx):  只投递给指定角色, 直接接受 (跳过过滤).
+          用于定时任务提醒等"只有本人该收到"的事件.
 
         Returns per-role result dict:
             {"role_name": {"accepted": bool, "reason": str, "task_id": str|None}}
@@ -59,13 +60,33 @@ class EventDispatcher:
         results: dict[str, dict[str, Any]] = {}
 
         logger.info(
-            "EventDispatcher trigger: id=%s type=%s/%s priority=%s",
+            "EventDispatcher trigger: id=%s type=%s/%s priority=%s target=%s",
             event.id, event.source, event.event_type, event.priority.name,
+            event.target_role or "(广播)",
         )
 
+        # 定向事件: 只投递给 target_role, 其他角色跳过
+        if event.target_role is not None:
+            for role_name in self._pool._roles:
+                if role_name == event.target_role:
+                    continue
+                self.stats["roles_notified"] += 1
+                self.stats["roles_skipped"] += 1
+                results[role_name] = {
+                    "accepted": False,
+                    "reason": f"定向事件, 目标: {event.target_role}",
+                    "task_id": None,
+                }
+
         for role_name, role in self._pool._roles.items():
-            self.stats["roles_notified"] += 1
-            accepted, reason = role.evaluate_event(event)
+            # 定向事件: 只处理目标角色, 直接接受 (任务是它自己创建的提醒)
+            if event.target_role is not None:
+                if role_name != event.target_role:
+                    continue
+                accepted, reason = True, f"定向任务提醒 (target_role={role_name})"
+            else:
+                self.stats["roles_notified"] += 1
+                accepted, reason = role.evaluate_event(event)
 
             task_id = None
             if accepted:

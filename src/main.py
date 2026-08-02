@@ -90,9 +90,25 @@ def main() -> None:
     info(f"HIGH 工单被接受: {accepted}")
     time_module.sleep(8.0)  # 让角色处理
 
+    # ── 4.5 定时任务 (Tick 提醒) ───────────────────────────
+    step("CEO 创建定时任务 (Tick 35 提醒写周报)...")
+    r = system.get_role("ceo")._tools.call_tool(
+        "create_task", {"description": "开始写季度报告", "tick": 35})
+    info(r.content[0].text)
+
+    step("推进到 Tick 35 (模拟时钟 +5小时50分, 触发任务提醒)...")
+    sim_now[0] = sim_now[0] + timedelta(hours=5, minutes=50)
+    time_module.sleep(1.5)
+    ok(f"当前: {system.describe()}")
+    pending = system.time_manager.list_tasks()
+    if not pending:
+        ok("定时任务已触发并投递给 CEO (定向事件, 其他角色未收到)")
+    else:
+        warn(f"任务仍在等待: {[t.description for t in pending]}")
+
     # ── 5. 下班 (SHIFT_END) ────────────────────────────────
-    step("推进到 Tick >= 60 (下班, 模拟时钟 +10小时05分)...")
-    sim_now[0] = sim_now[0] + timedelta(hours=10, minutes=5)
+    step("推进到 Tick >= 60 (下班, 模拟时钟 +4小时15分)...")
+    sim_now[0] = sim_now[0] + timedelta(hours=4, minutes=15)
     time_module.sleep(1.5)
     ok(f"当前: {system.describe()}")
 

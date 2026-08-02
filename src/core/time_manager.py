@@ -25,9 +25,10 @@ from __future__ import annotations
 import logging
 import threading
 import time as time_module
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from src.core.types import Event, Priority
 
@@ -37,13 +38,43 @@ logger = logging.getLogger(__name__)
 
 EVENT_SHIFT_START = "SHIFT_START"   # 上班事件
 EVENT_SHIFT_END = "SHIFT_END"       # 下班事件
+EVENT_TASK_DUE = "TASK_DUE"         # 定时任务提醒事件
 
 MINUTES_PER_TICK = 10       # 每 Tick 10 分钟
 TICKS_PER_DAY = 144         # 每天 144 Tick (24 小时)
 SHIFT_START_TICK = 0        # 上班: 每天第 0 Tick
 SHIFT_END_TICK = 60         # 下班: 每天第 60 Tick (10 小时工作制)
+TASK_TICK_MIN = 0           # 任务 Tick 范围下限
+TASK_TICK_MAX = 60          # 任务 Tick 范围上限 (工作时间 0~60)
 
 DEFAULT_CHECK_INTERVAL = 30  # 线程检查间隔 (秒)
+
+
+@dataclass
+class ScheduledTask:
+    """定时任务 (注册到 TimeManager, 到达指定 Tick 触发提醒事件).
+
+    参数:
+        task_id:      任务 ID (自动生成)
+        owner_role:   所属角色 role_id (事件只投递给该角色)
+        description:  任务内容描述
+        target_tick:  目标 Tick (今日 0~60 范围内)
+        day:          计划在哪一天触发 (默认创建时的当天)
+        payload:      附加数据
+        fired:        是否已触发 (触发后自动移除)
+    """
+    description: str
+    owner_role: str
+    target_tick: int
+    day: int = 1
+    task_id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
+    payload: dict[str, Any] = field(default_factory=dict)
+    created_at: float = field(default_factory=time_module.time)
+    fired: bool = False
+
+    def absolute_fire_tick(self, ticks_per_day: int) -> int:
+        """计算绝对触发 Tick: (day-1)*ticks_per_day + target_tick."""
+        return (self.day - 1) * ticks_per_day + self.target_tick
 
 
 @dataclass
@@ -76,6 +107,7 @@ class TimeManager:
     _fired_day: int = field(default=0, repr=False, init=False)      # 已触发事件的天
     _fired_start: bool = field(default=False, repr=False, init=False)
     _fired_end: bool = field(default=False, repr=False, init=False)
+    _tasks: dict[str, ScheduledTask] = field(default_factory=dict, repr=False, init=False)  # 定时任务表
 
     # ── 配置 ──────────────────────────────────────────────
 
@@ -219,14 +251,155 @@ class TimeManager:
     def is_running(self) -> bool:
         return self._running and self._thread is not None and self._thread.is_alive()
 
-    # ── 内部: 时间线程主循环 ──────────────────────────────
+    # ── 定时任务管理 ───────────────────────────────────────
+
+    def schedule_task(
+        self,
+        description: str,
+        owner_role: str,
+        target_tick: int,
+        day: Optional[int] = None,
+        payload: Optional[dict[str, Any]] = None,
+    ) -> ScheduledTask:
+        """注册一个定时任务, 到达指定 Tick 时向事件总线发送提醒事件.
+
+        参数:
+            description: 任务内容描述
+            owner_role:  所属角色 role_id (提醒事件只投递给该角色)
+            target_tick: 目标 Tick, 范围 0~60 (今天内)
+            day:         触发日期 (默认当天)
+            payload:     附加数据 (可选)
+
+        返回:
+            创建的 ScheduledTask.
+
+        异常:
+            ValueError: target_tick 超出 [0, 60] 范围.
+        """
+        if not (TASK_TICK_MIN <= target_tick <= TASK_TICK_MAX):
+            raise ValueError(
+                f"target_tick 必须在 {TASK_TICK_MIN}~{TASK_TICK_MAX} 范围内, 得到 {target_tick}"
+            )
+        task = ScheduledTask(
+            description=description,
+            owner_role=owner_role,
+            target_tick=target_tick,
+            day=day if day is not None else self.day_number(),
+            payload=payload or {},
+        )
+        self._tasks[task.task_id] = task
+        logger.info("TimeManager: 定时任务已注册 [%s] %s → tick %d (day %d), 所有者 %s",
+                    task.task_id, description, target_tick, task.day, owner_role)
+        return task
+
+    def list_tasks(self, owner_role: Optional[str] = None) -> list[ScheduledTask]:
+        """列出未触发的定时任务.
+
+        参数:
+            owner_role: 只列某角色的任务 (None = 全部).
+
+        返回:
+            未触发任务列表 (按触发顺序排序).
+        """
+        tasks = [t for t in self._tasks.values() if not t.fired]
+        if owner_role is not None:
+            tasks = [t for t in tasks if t.owner_role == owner_role]
+        return sorted(tasks, key=lambda t: t.absolute_fire_tick(self.ticks_per_day))
+
+    def edit_task(
+        self,
+        task_id: str,
+        description: Optional[str] = None,
+        target_tick: Optional[int] = None,
+        day: Optional[int] = None,
+    ) -> Optional[ScheduledTask]:
+        """编辑已有定时任务.
+
+        参数:
+            task_id:      任务 ID
+            description:  新描述 (可选)
+            target_tick:  新目标 Tick 0~60 (可选)
+            day:          新触发日 (可选)
+
+        返回:
+            更新后的任务, 不存在返回 None.
+
+        异常:
+            ValueError: target_tick 超出范围.
+        """
+        task = self._tasks.get(task_id)
+        if task is None:
+            return None
+        if description is not None:
+            task.description = description
+        if target_tick is not None:
+            if not (TASK_TICK_MIN <= target_tick <= TASK_TICK_MAX):
+                raise ValueError(
+                    f"target_tick 必须在 {TASK_TICK_MIN}~{TASK_TICK_MAX} 范围内, 得到 {target_tick}"
+                )
+            task.target_tick = target_tick
+        if day is not None:
+            task.day = day
+        logger.info("TimeManager: 定时任务已编辑 [%s] → tick %d (day %d)", task_id, task.target_tick, task.day)
+        return task
+
+    def cancel_task(self, task_id: str) -> bool:
+        """删除定时任务.
+
+        参数:
+            task_id: 任务 ID.
+
+        返回:
+            是否删除成功.
+        """
+        if task_id in self._tasks:
+            del self._tasks[task_id]
+            logger.info("TimeManager: 定时任务已删除 [%s]", task_id)
+            return True
+        return False
+
+    def _check_due_tasks(self) -> None:
+        """检查到期任务并发送提醒事件 (由时间线程周期性调用)."""
+        now_tick = self.current_tick()
+        for task_id, task in list(self._tasks.items()):
+            if task.fired:
+                continue
+            if now_tick >= task.absolute_fire_tick(self.ticks_per_day):
+                task.fired = True
+                del self._tasks[task_id]  # 一次性提醒, 触发后移除
+                self._fire_task_event(task)
+
+    def _fire_task_event(self, task: ScheduledTask) -> None:
+        """发送定时任务提醒事件 (定向投递给任务所有者)."""
+        event = Event(
+            source="task",
+            event_type=EVENT_TASK_DUE,
+            priority=Priority.NORMAL,
+            target_role=task.owner_role,
+            payload={
+                "task_id": task.task_id,
+                "description": task.description,
+                "tick": task.target_tick,
+                "day": task.day,
+                "owner_role": task.owner_role,
+            },
+        )
+        logger.info("TimeManager 任务提醒: [%s] %s → %s (tick %d, day %d)",
+                    task.task_id, task.description, task.owner_role, task.target_tick, task.day)
+
+        if self._event_sender is not None:
+            try:
+                self._event_sender(event)
+            except Exception:
+                logger.exception("TimeManager 任务事件发送失败: %s", task.task_id)
 
     def _tick_loop(self) -> None:
-        """时间线程主循环: 周期性检查 Tick, 触发作息事件."""
+        """时间线程主循环: 周期性检查 Tick, 触发作息事件与到期任务."""
         logger.debug("TimeManager 线程循环开始")
         while self._running:
             try:
                 self._check_and_fire()
+                self._check_due_tasks()
             except Exception:
                 logger.exception("TimeManager 检查异常")
             time_module.sleep(self.check_interval)

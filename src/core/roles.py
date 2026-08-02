@@ -315,6 +315,11 @@ class AgentRole:
             from src.python_tools.time_toolkit import bind_time_to_toolkit
             bind_time_to_toolkit(toolkit, self.time_manager)
 
+        # 定时任务工具类自动绑定该角色 (任务注册到共享 TimeManager)
+        if toolkit.name == "task":
+            from src.python_tools.task_toolkit import bind_role_to_toolkit
+            bind_role_to_toolkit(toolkit, self)
+
         return self._tools.add_toolkit(toolkit)
 
     @property

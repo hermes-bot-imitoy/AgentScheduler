@@ -6,7 +6,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum, IntEnum
-from typing import Any
+from typing import Any, Optional
 
 
 # ── Enums ────────────────────────────────────────────────────
@@ -44,11 +44,14 @@ class FilterDecision(str, Enum):
 class Event:
     """A normalized event entering the system."""
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
-    source: str = ""                    # e.g. "github", "email", "slack", "cron"
-    event_type: str = ""                # e.g. "new_pr", "mention", "alert", "heartbeat"
+    source: str = ""                    # e.g. "github", "email", "slack", "cron", "time", "task"
+    event_type: str = ""                # e.g. "new_pr", "mention", "alert", "SHIFT_START", "TASK_DUE"
     priority: Priority = Priority.NORMAL
     payload: dict[str, Any] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    # 定向投递: 只发给指定 role_id (None = 广播给所有角色)
+    target_role: Optional[str] = None
 
     # Filter metadata (set during processing)
     salience_score: float = 0.0
