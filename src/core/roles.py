@@ -314,10 +314,10 @@ class AgentRole:
             from src.python_tools.memory_toolkit import bind_store_to_toolkit
             bind_store_to_toolkit(toolkit, self.note_store, role=self)
 
-        # 时间工具类自动绑定该角色的 TimeManager (作息时间)
+        # 时间工具类自动绑定该角色的 TimeManager (作息时间) + 角色 (休息状态)
         if toolkit.name == "time":
             from src.python_tools.time_toolkit import bind_time_to_toolkit
-            bind_time_to_toolkit(toolkit, self.time_manager)
+            bind_time_to_toolkit(toolkit, self.time_manager, role=self)
 
         # 定时任务工具类自动绑定该角色 (任务注册到共享 TimeManager)
         if toolkit.name == "task":
