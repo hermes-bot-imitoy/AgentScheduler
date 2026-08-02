@@ -176,7 +176,7 @@ class AgentRole:
     def build_system_prompt(self) -> str:
         """构建角色完整 System Prompt.
 
-        组合: 人名, 职位, 职责, 性格, 技能, 额外提示.
+        组合: 人名, 职位, 职责, 性格, 技能, 当前日期(第几天), 额外提示.
         如果存在昨日总结 (NoteStore), 自动注入到提示词中.
         """
         parts = [
@@ -185,6 +185,10 @@ class AgentRole:
         ]
         if self.skills:
             parts.append(f"技能：{', '.join(self.skills)}。")
+
+        # 当前是第几天 (作息系统, 从共享 TimeManager 获取)
+        parts.append(f"今天是第 {self.time_manager.day_number()} 天。")
+
         if self.system_prompt_extra:
             parts.append(self.system_prompt_extra)
 

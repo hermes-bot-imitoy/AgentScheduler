@@ -143,6 +143,7 @@ def create_task_toolkit() -> ToolKit:
         description=(
             "新建一个定时任务, 到达指定 Tick 时系统会提醒你处理. "
             f"时间参数 tick 的单位: {TICK_RANGE_DESC}. "
+            "day 参数可指定任意第几天 (默认今天), 支持安排未来任何一天的任务. "
             "适合安排稍后要做的工作, 比如 'Tick 45 时开始写周报'."
         ),
         input_schema={
@@ -150,7 +151,7 @@ def create_task_toolkit() -> ToolKit:
             "properties": {
                 "description": {"type": "string", "description": "任务内容"},
                 "tick": {"type": "integer", "description": f"触发 Tick ({TICK_RANGE_DESC})"},
-                "day": {"type": "integer", "description": "第几天 (可选, 默认今天)"},
+                "day": {"type": "integer", "description": "第几天 (可选, 默认今天, 可设任意未来天)"},
             },
             "required": ["description", "tick"],
         },
