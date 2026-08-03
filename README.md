@@ -288,14 +288,21 @@ coder.talk_to("reviewer", "请审查 PR #188", urgency="HIGH")
 
 ```
 src/python_tools/
-├── __init__.py
-├── talk_toolkit.py        # 通信工具类: talk (角色间消息传递)
-├── hr_toolkit.py          # 人力资源工具类: post_job_posting (发布招聘), list_candidates
+├── __init__.py          # DEFAULT_TOOLKITS 默认工具注册表
+├── talk_toolkit.py      # 通信工具类: talk, list_roles (角色间消息/名单)
+├── memory_toolkit.py    # 记忆工具类: summary (总结+下班), write/edit/list/read_note
+├── time_toolkit.py      # 时间工具类: get_time, take_rest (作息)
+├── task_toolkit.py      # 定时任务工具类: create/list/edit/delete_task
+├── hr_toolkit.py        # 人力资源工具类: post_job_posting, list_candidates (非默认)
+├── client_toolkit.py    # 甲方交流工具类: talk_to_client (非默认, 通常只给 CEO)
 └── examples/
     └── add_python_tool.py # 示例: 如何添加一个 Python 工具
 ```
 
-角色可以一次导入整个工具类：
+**默认工具自动加载**：除 `hr`、`client` 外的所有工具类（memory/time/task）都
+登记在 `src/python_tools/__init__.py` 的 `DEFAULT_TOOLKITS` 中，角色被添加进
+`AgentSystem`（`auto_toolkits=True`）时自动逐个加载；`talk`/`list_roles` 由
+`pool.start()` 自动注入。`hr`/`client` 需手动添加：
 
 ```python
 from src.python_tools.hr_toolkit import create_hr_toolkit
