@@ -426,6 +426,10 @@ class AgentRole:
           ```tool_call
           {"tool": "name", "arguments": {...}}
           ```
+        兼容模型经常输出的平铺格式 (arguments 缺省时, 顶层其余字段作为参数):
+          ```tool_call
+          {"tool": "write_note", "title": "...", "content": "..."}
+          ```
         """
         # Match ```tool_call ... ``` block
         match = re.search(r'```tool_call\s*\n(.*?)\n\s*```', response, re.DOTALL)
@@ -434,9 +438,21 @@ class AgentRole:
 
         try:
             data = json.loads(match.group(1).strip())
-            return data.get("tool"), data.get("arguments", {})
         except json.JSONDecodeError:
             return None, {}
+
+        tool_name = data.get("tool")
+        if tool_name is None:
+            return None, {}
+
+        # 标准格式: arguments 字段存在 → 直接使用
+        args = data.get("arguments")
+        if isinstance(args, dict):
+            return tool_name, args
+
+        # 平铺格式: 去掉 "tool" 后的其余字段作为参数
+        flat_args = {k: v for k, v in data.items() if k != "tool"}
+        return tool_name, flat_args
 
 
 # ── RolePool ───────────────────────────────────────────────
