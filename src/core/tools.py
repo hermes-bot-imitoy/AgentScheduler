@@ -424,6 +424,15 @@ class ToolRegistry:
                 lines.append(f"  Input: {schema_str}")
             lines.append("")
 
+        # 使用规则: 防止 LLM 无限探索工具
+        lines.append("Rules:")
+        lines.append("- 只调用你确实需要的工具, 不要为了探索而逐个尝试所有工具.")
+        lines.append("- 任务明确时直接行动: 例如下班指令要求总结 → 直接调用 summary.")
+        lines.append("- 一次只调用一个工具 (或同一轮最多两个), 等待结果后再决定下一步.")
+        lines.append("- 任务已完成时, 直接输出最终答复, 不要再调用任何工具.")
+        lines.append("- 不要重复调用相同参数的同一工具 (如反复 get_time).")
+        lines.append("- 简单任务不需要工具时, 直接回复即可.")
+
         return "\n".join(lines)
 
     # ── Properties ────────────────────────────────────────

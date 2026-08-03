@@ -78,6 +78,7 @@ class AgentRole:
     skills: list[str] = field(default_factory=list)        # e.g. ["Python", "Go", "K8s"]
     system_prompt_extra: str = ""                          # appended to base system prompt
     is_default: bool = False                               # marked as a default/critical role
+    max_tool_rounds: int = 10                              # 工具调用循环上限 (防无限循环)
 
     # ── Event filter state (per-role) ─────────────────────
     state: AgentState = AgentState.ON_DUTY_IDLE            # role-specific lifecycle
@@ -382,7 +383,8 @@ class AgentRole:
         ]
 
         total_tokens = 0
-        max_rounds = 5  # prevent infinite loops
+        max_rounds = self.max_tool_rounds  # 工具调用轮次上限 (防无限循环)
+        last_assistant_text: str = ""  # 最近一次 LLM 的正文回复 (不含 tool_call 块)
 
         for _round in range(max_rounds):
             # Build conversation for this round
@@ -392,67 +394,91 @@ class AgentRole:
             round_tokens = usage.get("total_tokens", 0) if usage else 0
             total_tokens += round_tokens
 
-            # Check for tool_call
-            tool_name, tool_args = self._parse_tool_call(response_text)
+            # Check for tool_call (支持一个回复内多个 tool_call 块)
+            tool_calls = self._parse_tool_calls(response_text)
 
-            if tool_name is None:
+            if not tool_calls:
                 # Final response — no tool call
                 return response_text, total_tokens
 
-            # Execute tool
-            if self._tools is None:
-                tool_result = f"Error: no tools available (tool '{tool_name}' not found)"
-            else:
-                result = self._tools.call_tool(tool_name, tool_args)
-                tool_result = result.content[0].text if result.content else str(result)
+            # 记录 LLM 正文 (去掉 tool_call 块), 供达到上限时兜底返回
+            plain = response_text.split("```tool_call")[0].strip()
+            if plain:
+                last_assistant_text = plain
 
-            logger.info("[%s] Tool call: %s(%s) → %s",
-                        self.role_id, tool_name, json.dumps(tool_args, ensure_ascii=False),
-                        tool_result[:80])
+            # 顺序执行本轮的每个工具调用
+            results_feed: list[str] = []
+            for tool_name, tool_args in tool_calls:
+                if self._tools is None:
+                    tool_result = f"Error: no tools available (tool '{tool_name}' not found)"
+                else:
+                    result = self._tools.call_tool(tool_name, tool_args)
+                    tool_result = result.content[0].text if result.content else str(result)
 
-            # Feed tool result back to LLM
+                logger.info("[%s] Tool call: %s(%s) → %s",
+                            self.role_id, tool_name, json.dumps(tool_args, ensure_ascii=False),
+                            tool_result[:80])
+
+                results_feed.append(f"Tool result ({tool_name}):\n{tool_result}")
+
+            # Feed all tool results back to LLM
             messages.append({"role": "assistant", "content": response_text})
-            messages.append({"role": "user", "content": f"Tool result ({tool_name}):\n{tool_result}"})
+            messages.append({"role": "user", "content": "\n\n".join(results_feed)})
 
-        # Max rounds reached — return last response
+        # Max rounds reached — return the LLM's last substantive text (not the raw tool result)
         logger.warning("[%s] Max tool-calling rounds reached for task %s", self.role_id, task.task_id)
-        return messages[-1]["content"], total_tokens
+        if last_assistant_text:
+            return last_assistant_text + "\n(注: 工具调用已达轮次上限, 以上为处理结果.)", total_tokens
+        return f"(工具调用已达轮次上限, 共调用 {max_rounds} 轮)", total_tokens
 
     @staticmethod
-    def _parse_tool_call(response: str) -> tuple[Optional[str], dict[str, Any]]:
-        """Extract tool_call from LLM response.
+    def _parse_tool_calls(response: str) -> list[tuple[str, dict[str, Any]]]:
+        """Extract ALL tool_call blocks from LLM response.
 
         标准格式 (平铺顶层, LLM 最擅长):
           ```tool_call
           {"tool": "write_note", "title": "...", "content": "..."}
           ```
-        兼容旧格式 (arguments 包装, 有则优先使用):
-          ```tool_call
-          {"tool": "write_note", "arguments": {"title": "...", "content": "..."}}
-          ```
+        兼容包装格式 (arguments / args 为对象时优先使用):
+          {"tool": "write_note", "arguments": {...}}
+          {"tool": "write_note", "args": {...}}
+        一个回复可包含多个 tool_call 块, 全部返回.
+
+        返回:
+            [(tool_name, args_dict), ...] 列表, 无有效调用返回 [].
         """
-        # Match ```tool_call ... ``` block
-        match = re.search(r'```tool_call\s*\n(.*?)\n\s*```', response, re.DOTALL)
-        if not match:
+        blocks = re.findall(r'```tool_call\s*\n(.*?)\n\s*```', response, re.DOTALL)
+        calls: list[tuple[str, dict[str, Any]]] = []
+        for block in blocks:
+            try:
+                data = json.loads(block.strip())
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(data, dict):
+                continue
+            tool_name = data.get("tool")
+            if not isinstance(tool_name, str) or not tool_name:
+                continue
+            # 包装格式兼容: arguments / args 为对象时优先使用
+            for wrapper in ("arguments", "args"):
+                wrapped = data.get(wrapper)
+                if isinstance(wrapped, dict):
+                    calls.append((tool_name, wrapped))
+                    break
+            else:
+                # 标准平铺格式: 去掉保留键后的其余字段作为参数
+                flat_args = {k: v for k, v in data.items()
+                             if k not in ("tool", "arguments", "args")}
+                calls.append((tool_name, flat_args))
+        return calls
+
+    @staticmethod
+    def _parse_tool_call(response: str) -> tuple[Optional[str], dict[str, Any]]:
+        """兼容旧接口: 只取第一个 tool_call 块."""
+        calls = AgentRole._parse_tool_calls(response)
+        if not calls:
             return None, {}
-
-        try:
-            data = json.loads(match.group(1).strip())
-        except json.JSONDecodeError:
-            return None, {}
-
-        tool_name = data.get("tool")
-        if tool_name is None:
-            return None, {}
-
-        # 旧格式兼容: arguments 为对象时优先使用
-        args = data.get("arguments")
-        if isinstance(args, dict):
-            return tool_name, args
-
-        # 标准平铺格式: 去掉 "tool" 后的其余字段作为参数
-        flat_args = {k: v for k, v in data.items() if k != "tool"}
-        return tool_name, flat_args
+        return calls[0]
 
 
 # ── RolePool ───────────────────────────────────────────────

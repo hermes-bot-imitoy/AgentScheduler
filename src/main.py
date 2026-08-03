@@ -129,8 +129,8 @@ def run_one_day(system: AgentSystem, sim_now: list[datetime], day: int,
     time_module.sleep(1.5)
     ok(f"当前: {system.describe()}")
 
-    step("等待角色调用 summary 工具 (最长 90 秒)...")
-    deadline = time_module.time() + 90
+    step("等待角色调用 summary 工具 (最长 240 秒)...")
+    deadline = time_module.time() + 240
     while time_module.time() < deadline:
         if all(system.get_role(rid).state == AgentState.OFF_DUTY for rid in ROLE_IDS):
             break
