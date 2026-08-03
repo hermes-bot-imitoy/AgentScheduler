@@ -1,7 +1,10 @@
 """通信工具类 (Communication ToolKit).
 
-包含 talk 工具: 角色之间的消息传递与任务委托。
-这是一个 Python 原生工具类 (ToolKit) 的示例实现。
+包含:
+  - talk:       角色之间的消息传递与任务委托
+  - list_roles: 获取当前团队角色列表 (与 talk 花名册格式一致)
+
+团队花名册格式固定, 由 build_team_roster() 统一生成.
 
 用法:
     from src.python_tools.talk_toolkit import create_talk_toolkit
@@ -19,20 +22,18 @@ from src.core.tools import ToolKit
 logger = logging.getLogger(__name__)
 
 
-def create_talk_toolkit(pool: Any) -> ToolKit:
-    """创建通信工具类 (talk 工具).
+def build_team_roster(pool: Any) -> str:
+    """构建团队花名册 (固定格式, 供 talk 描述与 list_roles 工具复用).
+
+    格式:
+        - **姓名** (role_id: `xxx`) -- 职责  Skills: 技能列表
 
     参数:
-        pool: RolePool 实例, 用于查找目标角色并投递任务.
+        pool: RolePool 实例.
 
     返回:
-        包含 talk 工具的 ToolKit 实例.
+        花名册字符串 (每行一个成员).
     """
-    from src.core.roles import Task, Urgency
-
-    tk = ToolKit(name="communication", description="角色间通信工具类")
-
-    # 构建团队花名册: 每个成员的姓名, 职能, 职责, 技能
     roster_lines: list[str] = []
     for rid, r in pool._roles.items():
         resp = r.responsibilities or r.title
@@ -40,7 +41,24 @@ def create_talk_toolkit(pool: Any) -> ToolKit:
             f"  - **{r.name}** (role_id: `{rid}`) -- {resp}  "
             f"Skills: {', '.join(r.skills[:4])}"
         )
-    team_roster = "\n".join(roster_lines)
+    return "\n".join(roster_lines)
+
+
+def create_talk_toolkit(pool: Any) -> ToolKit:
+    """创建通信工具类 (talk + list_roles).
+
+    参数:
+        pool: RolePool 实例, 用于查找目标角色并投递任务.
+
+    返回:
+        包含 talk / list_roles 工具的 ToolKit 实例.
+    """
+    from src.core.roles import Task, Urgency
+
+    tk = ToolKit(name="communication", description="角色间通信工具类")
+
+    # 团队花名册 (静态快照, 注入 talk 的描述中)
+    team_roster = build_team_roster(pool)
 
     def _talk_handler(args: dict[str, Any]) -> str:
         """talk 工具处理函数: 发送消息给指定角色.
@@ -73,6 +91,20 @@ def create_talk_toolkit(pool: Any) -> ToolKit:
             f"对方队列现有 {target_role.queue_depth} 个任务."
         )
 
+    def _list_roles_handler(args: dict[str, Any]) -> str:
+        """list_roles 工具处理函数: 实时获取当前团队角色列表.
+
+        参数:
+            args: 无.
+
+        返回:
+            当前角色花名册 (与 talk 描述中的格式一致).
+        """
+        roster = build_team_roster(pool)  # 动态构建, 包含新入职角色
+        if not roster:
+            return "(当前无团队成员)"
+        return f"当前团队成员:\n{roster}"
+
     tk.add_python_tool(
         name="talk",
         description=(
@@ -100,6 +132,17 @@ def create_talk_toolkit(pool: Any) -> ToolKit:
             "required": ["target", "message"],
         },
         handler=_talk_handler,
+    )
+
+    tk.add_python_tool(
+        name="list_roles",
+        description=(
+            "获取当前团队都有哪些角色 (姓名/role_id/职责/技能). "
+            "当你不确定该找谁处理某件事, 或想知道团队里有哪些人时使用. "
+            "返回格式与 talk 工具的团队花名册一致."
+        ),
+        input_schema={"type": "object", "properties": {}},
+        handler=_list_roles_handler,
     )
 
     return tk
