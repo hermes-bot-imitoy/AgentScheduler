@@ -20,6 +20,13 @@ from __future__ import annotations
 import logging
 import sys
 import time as time_module
+from pathlib import Path
+
+# 支持 `python src/main.py` 直接启动: 把项目根目录加入 sys.path,
+# 否则 sys.path[0] 是 src/ 目录, `from src.core...` 导入会失败
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.core.agent_system import AgentSystem
 from src.core.types import AgentState, Event, Priority
