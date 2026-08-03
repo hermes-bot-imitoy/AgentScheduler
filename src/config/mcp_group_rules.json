@@ -17,8 +17,7 @@
         "get_file_info",
         "list_allowed_directories",
         "create_directory",
-        "move_file",
-        "delete_file"
+        "move_file"
       ]
     },
     {

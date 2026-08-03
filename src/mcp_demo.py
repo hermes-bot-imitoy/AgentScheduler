@@ -114,9 +114,9 @@ def main() -> None:
     r = call(file_tools, "get_file_info", {"path": str(PROJECT_ROOT / "README.md")})
     ok("get_file_info 获取 README 信息") if "README.md" in r else info(r[:80])
 
-    # 2g. 清理演示文件
-    call(file_tools, "delete_file", {"path": demo_file})
-    ok("delete_file 清理演示文件")
+    # 2g. 清理演示文件 (官方服务器刻意不含 delete_file, 本地清理)
+    Path(demo_file).unlink(missing_ok=True)
+    ok("演示文件已清理 (本地; 官方 filesystem 服务器无 delete_file, 属安全设计)")
 
     # ── 3. 注册到角色 + LLM 使用 ─────────────────────────────
     header("角色使用文件工具 (LLM 自主调用)")
