@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-"""MAF 作息系统演示 — 多日循环.
+"""MAF 作息系统演示 — 多日循环 (仅第 1 天有甲方沟通任务).
 
-流程 (每天):
-  1. 4 默认角色 (CEO/COO/HR/CFO), CEO 装备 talk_to_client
-  2. 新的一天开始 → SHIFT_START (EMERGENCY) 全员上班
-  3. CEO 注册当天任务: Tick 1 与用户沟通项目要求
-  4. 白天: LOW 过滤 / HIGH 工单 / 定时任务提醒
-  5. Tick 60 下班 → 各角色调 summary → OFF_DUTY
-  6. 询问用户: 是否继续下一天? 是 → 循环, 否 → 退出
+流程:
+  1. 开局: 4 个默认角色 (CEO/COO/HR/CFO), CEO 装备 talk_to_client
+  2. 第 1 天: CEO 注册 Tick 1 任务, 与用户沟通项目要求
+  3. 第 2 天起: 不再安排甲方沟通, 直接重复每天的日常循环
+     (SHIFT_START → 工作事件 → SHIFT_END → summary → OFF_DUTY)
+  4. 每天结束询问用户: 是否继续下一天? 是 → 循环, 否 → 退出
 
 运行:
     cd maf_scheduler && source .venv/bin/activate && python -m src.main
@@ -63,13 +62,15 @@ def ask_continue() -> bool:
     return ans in ("y", "yes", "是", "")
 
 
-def run_one_day(system: AgentSystem, sim_now: list[datetime], day: int) -> None:
+def run_one_day(system: AgentSystem, sim_now: list[datetime], day: int,
+                with_client_task: bool) -> None:
     """运行一天的完整流程.
 
     参数:
-        system:  AgentSystem 实例
-        sim_now: 可变的模拟时钟 (list[datetime], [0] 为当前时间)
-        day:     当前第几天
+        system:           AgentSystem 实例
+        sim_now:          可变的模拟时钟 (list[datetime], [0] 为当前时间)
+        day:              当前第几天
+        with_client_task: 是否安排 CEO 与甲方沟通任务 (仅第 1 天为 True)
     """
     header(f"第 {day} 天")
 
@@ -81,26 +82,31 @@ def run_one_day(system: AgentSystem, sim_now: list[datetime], day: int) -> None:
 
     ok(f"当前: {system.describe()}")
 
-    # ── CEO 当天开局任务: Tick 1 与用户沟通项目要求 ────────
-    step(f"CEO 注册当天任务: 第 {day} 天 Tick 1 与用户沟通项目要求...")
-    ceo = system.get_role("ceo")
-    task = system.time_manager.schedule_task(
-        description="与用户沟通项目要求, 收集今天要开发的项目需求",
-        owner_role="ceo",
-        target_tick=1,
-        day=day,
-    )
-    ok(f"任务已注册 [ID={task.task_id}]: 第 {day} 天 Tick 1 → CEO")
+    # ── 第 1 天: CEO 与甲方沟通 (仅此一次) ─────────────────
+    if with_client_task:
+        step("CEO 注册开局任务: Tick 1 与用户沟通项目要求...")
+        ceo = system.get_role("ceo")
+        task = system.time_manager.schedule_task(
+            description="与用户沟通项目要求, 收集今天要开发的项目需求",
+            owner_role="ceo",
+            target_tick=1,
+            day=day,
+        )
+        ok(f"任务已注册 [ID={task.task_id}]: 第 {day} 天 Tick 1 → CEO")
 
-    # ── 推进到 Tick 1 → CEO 与甲方交流 ─────────────────────
-    step("推进到 Tick 1 (CEO 任务触发 → 与用户沟通)...")
-    sim_now[0] = sim_now[0] + timedelta(minutes=10)
-    info("请在上方 [甲方] 提示处输入项目要求 (例如: 帮我开发一个支付系统)")
-    time_module.sleep(5.0)  # 等待 CEO LLM 调用 talk_to_client (用户输入后继续)
-    if system.time_manager.list_tasks():
-        warn("CEO 任务可能仍在处理中 (LLM 调用较慢)")
+        step("推进到 Tick 1 (CEO 任务触发 → 与用户沟通)...")
+        sim_now[0] = sim_now[0] + timedelta(minutes=10)
+        info("请在上方 [甲方] 提示处输入项目要求 (例如: 帮我开发一个支付系统)")
+        time_module.sleep(5.0)  # 等待 CEO LLM 调用 talk_to_client (用户输入后继续)
+        if system.time_manager.list_tasks():
+            warn("CEO 任务可能仍在处理中 (LLM 调用较慢)")
+        else:
+            ok("CEO 开局任务已触发并投递 (定向事件, 其他角色未收到)")
     else:
-        ok("CEO 开局任务已触发并投递 (定向事件, 其他角色未收到)")
+        # 第 2 天起: 不再安排甲方沟通, 直接进入日常工作
+        step("今天没有甲方沟通任务, 直接进入日常工作...")
+        sim_now[0] = sim_now[0] + timedelta(minutes=20)  # 推进到 Tick 2
+        time_module.sleep(1.0)
 
     # ── 白天工作事件 ───────────────────────────────────────
     step("投递 LOW 事件 (闲聊, 应被显著性过滤, 0 Token)...")
@@ -145,7 +151,7 @@ def run_one_day(system: AgentSystem, sim_now: list[datetime], day: int) -> None:
 
 
 def main() -> None:
-    header("MAF 作息系统演示 — 多日循环")
+    header("MAF 作息系统演示 — 多日循环 (仅第 1 天与甲方沟通)")
 
     # ── 1. 开局: 4 个默认角色 + CEO 甲方交流工具 ───────────
     step("创建 AgentSystem, 加入 4 个默认角色 (ceo/coo/hr/cfo)...")
@@ -163,26 +169,16 @@ def main() -> None:
     states = {rid: system.get_role(rid).state.value for rid in ROLE_IDS}
     info(f"角色状态: {states}")
 
-    # ── 3. 多日循环 ────────────────────────────────────────
+    # ── 3. 多日循环: 第 1 天有甲方沟通, 之后重复日常 ────────
     day = 1
     while True:
-        run_one_day(system, sim_now, day)
+        run_one_day(system, sim_now, day, with_client_task=(day == 1))
 
         # 一天结束: 询问用户是否继续
         if not ask_continue():
             print(f"\n  {YELLOW}停止循环, 系统关闭.{RESET}")
             break
         day += 1
-
-    # ── 4. 收尾: 第 2 天冷启动注入昨日总结演示 ─────────────
-    if day >= 2:
-        step("演示: 第 2 天 build_system_prompt 注入昨日总结...")
-        sim_now[0] = sim_now[0] + timedelta(hours=16)
-        prompt = system.get_role("ceo").build_system_prompt()
-        if "[昨日总结]" in prompt:
-            ok(f"第 {day} 天 System Prompt 已注入昨日总结 (system.day = {system.day})")
-        else:
-            warn(f"提示词未注入总结 (system.day = {system.day})")
 
     system.stop()
     print(f"\n{BOLD}{GREEN}演示完成 ✓{RESET} (共运行 {day} 天)")
