@@ -32,7 +32,11 @@ from src.core.agent_system import AgentSystem
 from src.core.types import AgentState, Event, Priority
 from src.python_tools.client_toolkit import create_client_toolkit
 
-logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+# 调试期: DEBUG 日志永久启用 (临时). 打印 LLM 追加内容/工具调用全链路.
+# 第三方库 (requests/urllib3/httpcore) 的 DEBUG 刷屏太多, 压回 WARNING.
+logging.basicConfig(level=logging.DEBUG, format="%(levelname)s %(name)s: %(message)s")
+for _noisy in ("requests", "urllib3", "httpcore", "httpx", "openai"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
 
 BOLD = "\033[1m"; GREEN = "\033[32m"; YELLOW = "\033[33m"
 RED = "\033[31m"; CYAN = "\033[36m"; MAGENTA = "\033[35m"; RESET = "\033[0m"
