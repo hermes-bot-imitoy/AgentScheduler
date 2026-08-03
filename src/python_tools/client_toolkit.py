@@ -41,9 +41,12 @@ def create_client_toolkit() -> ToolKit:
         """
         question = args.get("message", "").strip()
 
-        # 控制台交互: 阻塞等待用户输入
+        # 控制台交互: 先打印 CEO 说的话, 再阻塞等待用户输入
         if question:
-            print(f"\n  {BOLD}[甲方] {question}{RESET}", flush=True)
+            print(f"\n  {BOLD}[CEO] {question}{RESET}", flush=True)
+        else:
+            # LLM 未传 message 时也提示一句, 避免控制台静默
+            print(f"\n  {BOLD}[CEO] (发来一条消息, 请回复){RESET}", flush=True)
         prompt_text = "  [甲方] 请输入你的回复: "
 
         try:

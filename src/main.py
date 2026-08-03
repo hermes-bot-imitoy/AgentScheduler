@@ -130,7 +130,7 @@ def run_one_day(system: AgentSystem, day: int, with_client_task: bool) -> None:
             lambda: system.time_manager.current_tick() >= fire_tick,
             timeout_seconds=(TICK1_MINUTES + 5) * 60,
         )
-        info("请在上方 [甲方] 提示处输入项目要求 (例如: 帮我开发一个支付系统)")
+        info("请在上方 [CEO] 提示处输入项目要求 (例如: 帮我开发一个支付系统)")
         # 等待 CEO 任务被处理 (用户输入后 LLM 继续)
         time_module.sleep(10)
     else:
