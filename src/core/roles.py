@@ -78,7 +78,6 @@ class AgentRole:
     skills: list[str] = field(default_factory=list)        # e.g. ["Python", "Go", "K8s"]
     system_prompt_extra: str = ""                          # appended to base system prompt
     is_default: bool = False                               # marked as a default/critical role
-    max_tool_rounds: int = 8                               # 工具调用循环上限 (防无限循环)
 
     # ── Event filter state (per-role) ─────────────────────
     state: AgentState = AgentState.ON_DUTY_IDLE            # role-specific lifecycle
@@ -383,9 +382,7 @@ class AgentRole:
         ]
 
         total_tokens = 0
-        max_rounds = self.max_tool_rounds  # 工具调用轮次上限 (防无限循环)
-
-        last_assistant_text: str = ""  # 最近一次 LLM 的正文回复 (不含 tool_call 标记)
+        max_rounds = 5  # prevent infinite loops
 
         for _round in range(max_rounds):
             # Build conversation for this round
@@ -402,11 +399,6 @@ class AgentRole:
                 # Final response — no tool call
                 return response_text, total_tokens
 
-            # 记录 LLM 正文 (去掉 tool_call 块), 供达到上限时兜底返回
-            plain = response_text.split("```tool_call")[0].strip()
-            if plain:
-                last_assistant_text = plain
-
             # Execute tool
             if self._tools is None:
                 tool_result = f"Error: no tools available (tool '{tool_name}' not found)"
@@ -422,11 +414,9 @@ class AgentRole:
             messages.append({"role": "assistant", "content": response_text})
             messages.append({"role": "user", "content": f"Tool result ({tool_name}):\n{tool_result}"})
 
-        # Max rounds reached — return the LLM's last substantive text (not the raw tool result)
+        # Max rounds reached — return last response
         logger.warning("[%s] Max tool-calling rounds reached for task %s", self.role_id, task.task_id)
-        if last_assistant_text:
-            return last_assistant_text + "\n(注: 工具调用已达轮次上限, 以上为处理结果.)", total_tokens
-        return f"(工具调用已达轮次上限, 共调用 {max_rounds} 轮)", total_tokens
+        return messages[-1]["content"], total_tokens
 
     @staticmethod
     def _parse_tool_call(response: str) -> tuple[Optional[str], dict[str, Any]]:
