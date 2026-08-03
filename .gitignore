@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 *.pyo
 data/journals/
+data/notes/
 .DS_Store
 *.egg-info/
 dist/
