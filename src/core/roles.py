@@ -422,13 +422,13 @@ class AgentRole:
     def _parse_tool_call(response: str) -> tuple[Optional[str], dict[str, Any]]:
         """Extract tool_call from LLM response.
 
-        Supports format:
-          ```tool_call
-          {"tool": "name", "arguments": {...}}
-          ```
-        兼容模型经常输出的平铺格式 (arguments 缺省时, 顶层其余字段作为参数):
+        标准格式 (平铺顶层, LLM 最擅长):
           ```tool_call
           {"tool": "write_note", "title": "...", "content": "..."}
+          ```
+        兼容旧格式 (arguments 包装, 有则优先使用):
+          ```tool_call
+          {"tool": "write_note", "arguments": {"title": "...", "content": "..."}}
           ```
         """
         # Match ```tool_call ... ``` block
@@ -445,12 +445,12 @@ class AgentRole:
         if tool_name is None:
             return None, {}
 
-        # 标准格式: arguments 字段存在 → 直接使用
+        # 旧格式兼容: arguments 为对象时优先使用
         args = data.get("arguments")
         if isinstance(args, dict):
             return tool_name, args
 
-        # 平铺格式: 去掉 "tool" 后的其余字段作为参数
+        # 标准平铺格式: 去掉 "tool" 后的其余字段作为参数
         flat_args = {k: v for k, v in data.items() if k != "tool"}
         return tool_name, flat_args
 

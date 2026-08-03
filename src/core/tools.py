@@ -411,8 +411,9 @@ class ToolRegistry:
 
         lines = ["You have access to the following tools. To use a tool, respond with:"]
         lines.append('```tool_call')
-        lines.append('{"tool": "<tool_name>", "arguments": {...}}')
+        lines.append('{"tool": "<tool_name>", "<参数名>": <值>, ...}')
         lines.append('```')
+        lines.append('例如: {"tool": "write_note", "title": "会议记录", "content": "..."}')
         lines.append("")
 
         for tk_name, tk_tools in by_toolkit.items():
