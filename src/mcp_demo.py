@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
-"""mcp_demo.py — MCP Tool integration demo.
+"""mcp_demo.py — 真实 MCP 文件工具演示 (官方 filesystem 服务器).
 
-Demonstrates:
-  - Registering MCP-compatible tools on roles
-  - Tool-calling loop (LLM decides when to use tools)
-  - Multi-round conversation with tool results fed back
-  - Per-role tool isolation
+演示内容:
+  1. 用 MCPToolLoader 以 npx 启动官方 filesystem 服务器 (授权目录)
+  2. 按分组规则加载 file_ops 工具组 (read/write/edit/search 等)
+  3. 直接调用工具验证 (确定性): 读/写/编辑/查找/列目录
+  4. 将工具组注册到角色, 让 LLM 用文件工具完成任务
 
-Run:
+授权目录: 默认项目根目录, 可用环境变量 MCP_FS_ALLOWED_DIR 覆盖.
+服务器:   npx -y @modelcontextprotocol/server-filesystem <授权目录>
+
+运行:
     cd maf_scheduler && source .venv/bin/activate && python -m src.mcp_demo
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
@@ -21,146 +25,140 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-os.environ.setdefault("DEEPSEEK_API_KEY", "sk-f29a3265f9e34c3bbf8f86f9142a57c9")
+os.environ.setdefault("DEEPSEEK_API_KEY", "sk-请用环境变量传入")
 os.environ.setdefault("DEEPSEEK_MODEL", "deepseek-v4-flash")
 os.environ.setdefault("DEEPSEEK_THINKING", "true")
 
 from src.core.roles import AgentRole, RolePool, Task, Urgency
-from src.core.tools import ToolRegistry
+from src.python_tools.mcp_toolkit import MCPToolLoader
 
 # ── Logging ──────────────────────────────────────────────────
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%H:%M:%S",
-)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
 BOLD = "\033[1m"; GREEN = "\033[32m"; CYAN = "\033[36m"
-BLUE = "\033[34m"; MAGENTA = "\033[35m"; YELLOW = "\033[33m"; RESET = "\033[0m"
+BLUE = "\033[34m"; MAGENTA = "\033[35m"; YELLOW = "\033[33m"; RED = "\033[31m"; RESET = "\033[0m"
+
+# 授权目录: 默认项目根 (filesystem 服务器只允许访问授权目录内的文件)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+ALLOWED_DIR = os.environ.get("MCP_FS_ALLOWED_DIR", str(PROJECT_ROOT))
+FILESYSTEM_PKG = "@modelcontextprotocol/server-filesystem"
 
 
 def header(text: str) -> None:
-    print(f"\n{BOLD}{CYAN}{'═' * 60}{RESET}")
+    print(f"\n{BOLD}{CYAN}{'═' * 62}{RESET}")
     print(f"{BOLD}{CYAN}  {text}{RESET}")
-    print(f"{BOLD}{CYAN}{'═' * 60}{RESET}\n")
+    print(f"{BOLD}{CYAN}{'═' * 62}{RESET}\n")
 
 
-# ── Mock tool handlers ────────────────────────────────────
-
-def _query_db(args: dict) -> str:
-    """Simulate database query."""
-    query = args.get("query", "").lower()
-    if "user" in query:
-        return json.dumps({
-            "count": 15420,
-            "last_signup": "2026-07-29T08:15:00Z",
-            "active_today": 892,
-        })
-    elif "error" in query or "log" in query:
-        return json.dumps({
-            "recent_errors": [
-                {"time": "08:12:03", "level": "ERROR", "msg": "AuthService.validate() NPE at line 42"},
-                {"time": "08:11:58", "level": "WARN", "msg": "Slow query: SELECT * FROM sessions WHERE ..."},
-                {"time": "08:10:45", "level": "ERROR", "msg": "Connection pool exhausted"},
-            ]
-        })
-    return '{"result": "no matching data"}'
-
-import json
+def ok(text: str) -> None:
+    print(f"  {GREEN}✓ {text}{RESET}")
 
 
-def main():
-    header("MCP Tool Integration — Role with Tool-Calling Loop")
+def info(text: str) -> None:
+    print(f"  {text}")
 
-    # ── Create roles with tools ──────────────────────────────
 
-    ops_bot = AgentRole(
+def main() -> None:
+    header("真实 MCP 文件工具 — 官方 filesystem 服务器")
+
+    def call(file_tools, name: str, args: dict) -> str:
+        """直接调用工具组内某个工具 (确定性验证用)."""
+        td = file_tools.get_tool(name)
+        return td.handler(args) if td else f"(工具 {name} 未加载)"
+
+    # ── 1. 加载文件工具 (npx 启动服务器) ────────────────────
+    print(f"  授权目录: {ALLOWED_DIR}")
+    loader = MCPToolLoader(server_args={FILESYSTEM_PKG: [ALLOWED_DIR]})
+    toolkits = loader.load()
+
+    file_tools = toolkits.get("file_ops")
+    if file_tools is None:
+        print(f"  {RED}✗ file_ops 工具组加载失败 (服务器可能未连接){RESET}")
+        loader.close()
+        sys.exit(1)
+
+    print(f"\n  {GREEN}file_ops 工具组已加载, 共 {file_tools.tool_count} 个工具:{RESET}")
+    for name in file_tools.tool_names:
+        print(f"    - {name}")
+    print(f"  (来自 {FILESYSTEM_PKG})")
+
+    # ── 2. 直接调用工具验证 (确定性) ────────────────────────
+    header("直接调用文件工具 (确定性验证)")
+
+    # 2a. write_file: 写入演示文件
+    demo_file = str(PROJECT_ROOT / "data" / "mcp_demo_note.md")
+    Path(PROJECT_ROOT / "data").mkdir(exist_ok=True)
+    r = call(file_tools, "write_file", {"path": demo_file, "content": "MCP 文件工具演示\n- 第 1 行\n"})
+    info(f"write_file → {r[:80]}")
+    ok("write_file 写入成功") if "wrote" in r.lower() or "成功" in r else info("write_file 返回: " + r[:60])
+
+    # 2b. read_file: 读回
+    r = call(file_tools, "read_file", {"path": demo_file})
+    ok(f"read_file 读回: {r.splitlines()[0][:40]}") if "MCP 文件工具演示" in r else info(r[:80])
+
+    # 2c. edit_file: 编辑追加 (返回 diff 格式)
+    r = call(file_tools, "edit_file", {"path": demo_file, "edits": [{"oldText": "- 第 1 行", "newText": "- 第 1 行 (已编辑)"}]})
+    ok("edit_file 编辑成功 (返回 diff)") if "Index:" in r or "成功" in r else info("edit_file 返回: " + r[:60])
+
+    # 2d. search_files: 查找 (注意: pattern 是文件名 glob, 如 *.py)
+    r = call(file_tools, "search_files", {"path": str(PROJECT_ROOT / "src" / "core"), "pattern": "*.py"})
+    hit = "time_manager.py" in r
+    ok(f"search_files 找到 time_manager.py (glob *.py): {r[:60]}") if hit else info(r[:80])
+
+    # 2e. list_directory: 列目录
+    r = call(file_tools, "list_directory", {"path": str(PROJECT_ROOT / "src" / "core")})
+    ok("list_directory 列出 core 目录") if "time_manager.py" in r else info(r[:80])
+
+    # 2f. get_file_info
+    r = call(file_tools, "get_file_info", {"path": str(PROJECT_ROOT / "README.md")})
+    ok("get_file_info 获取 README 信息") if "README.md" in r else info(r[:80])
+
+    # 2g. 清理演示文件
+    call(file_tools, "delete_file", {"path": demo_file})
+    ok("delete_file 清理演示文件")
+
+    # ── 3. 注册到角色 + LLM 使用 ─────────────────────────────
+    header("角色使用文件工具 (LLM 自主调用)")
+
+    assistant = AgentRole(
         name="赵强",
         role_id="ops",
-        title="Site Reliability Engineer",
+        title="SRE 工程师",
         personality="冷静果断，先止损再排查。擅长在压力下快速定位问题。",
-        skills=["Kubernetes", "Prometheus", "PostgreSQL", "Linux"],
+        skills=["Kubernetes", "Linux", "Python", "日志分析"],
     )
-
-    # Import Python toolkits (bulk registration)
-    from src.core.tools import create_coding_toolkit
-
-    ops_bot.add_toolkit(create_coding_toolkit())
-    # Single MCP-style tools still work too
-    ops_bot.add_mcp_tool(
-        name="query_logs",
-        description="Query recent application logs and error messages",
-        input_schema={
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "Search keyword (e.g. 'error', 'user', 'login')"},
-            },
-            "required": ["query"],
-        },
-        handler=_query_db,
-    )
-
-    print(f"  {GREEN}ops bot tools:{RESET}")
-    for name in ops_bot.mcp_tool_names:
-        print(f"    - {name}")
-    print(f"  (coding toolkit: 3 tools + query_logs = 4 total)\n")
-
-    # ── Start pool ──────────────────────────────────────────
+    assistant.add_toolkit(file_tools)
+    print(f"  角色 {assistant.name} ({assistant.role_id}) 工具: {assistant.mcp_tool_names}")
 
     pool = RolePool()
-    pool.add_role(ops_bot)
-
-    def on_start(role: AgentRole, task: Task) -> None:
-        urg = Urgency(-task.urgency)
-        print(f"\n  {BLUE}[{role.role_id}]{RESET} {YELLOW}▶ {urg.name}{RESET} — {task.description[:80]}")
+    pool.add_role(assistant)
 
     def on_done(role: AgentRole, task: Task) -> None:
-        status_icon = f"{GREEN}✓{RESET}" if task.status == "done" else "\033[31m✗\033[0m"
-        print(f"  {BLUE}[{role.role_id}]{RESET} {status_icon} done ({task.tokens_consumed}t)")
-        print(f"  {MAGENTA}→{RESET} {task.result[:300]}")
+        status_icon = f"{GREEN}✓{RESET}" if task.status == "done" else f"{RED}✗{RESET}"
+        print(f"\n  {BLUE}[{role.role_id}]{RESET} {status_icon} done ({task.tokens_consumed}t)")
+        print(f"  {MAGENTA}→{RESET} {task.result[:400]}")
 
-    ops_bot.on_task_start = on_start
-    ops_bot.on_task_done = on_done
-
+    assistant.on_task_done = on_done
     pool.start()
-
-    # ════════════════════════════════════════════════════════════
-    #  Scenario 1: Diagnose with coding toolkit + custom tools
-    # ════════════════════════════════════════════════════════════
-    header("Scenario 1: Diagnose Production Issue (coding toolkit + query_logs)")
-
-    pool.assign_task("ops", Task(
-        urgency=Urgency.CRITICAL,
-        description=(
-            "用户报告登录页面返回 500 错误。请使用可用工具诊断问题：\n"
-            "1. 先查询最近的错误日志\n"
-            "2. 检查服务器状态\n"
-            "3. 给出诊断结论和修复建议"
-        ),
-    ))
-
-    time.sleep(12)
-
-    # ════════════════════════════════════════════════════════════
-    #  Scenario 2: Check pod status with kubectl
-    # ════════════════════════════════════════════════════════════
-    header("Scenario 2: Check Pod Health After Fix")
 
     pool.assign_task("ops", Task(
         urgency=Urgency.HIGH,
         description=(
-            "修复已部署。请使用可用工具确认服务恢复正常：\n"
-            "1. 运行 kubectl 检查 pod 状态\n"
-            "2. 再次查询错误日志确认没有新的错误"
+            "请使用文件工具完成以下工作:\n"
+            "1. 用 read_file 读取 README.md 的前几行, 了解项目是什么\n"
+            "2. 在 data/ 目录下用 write_file 创建 ops_report.md, 记录项目的核心功能\n"
+            "3. 用 search_files (pattern 是文件名 glob) 在 src/core/ 下查找 *.py 文件, 找出含 AgentSystem 类的文件\n"
+            "完成后用一句话汇报结果"
         ),
     ))
 
-    time.sleep(12)
+    time.sleep(60)  # 等 LLM 完成 (npx 服务器已连, 工具调用较快)
 
-    # ── Shutdown ───────────────────────────────────────────
+    # ── 4. 收尾 ─────────────────────────────────────────────
     pool.shutdown()
-    print(f"\n{BOLD}{GREEN}MCP Tool Demo Complete.{RESET}\n")
+    loader.close()
+    print(f"\n{BOLD}{GREEN}MCP 文件工具演示完成 ✓{RESET}\n")
 
 
 if __name__ == "__main__":

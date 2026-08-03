@@ -384,6 +384,10 @@ dev.add_toolkit(toolkits["git_ops"])    # 再导入 git 工具组
 | `@modelcontextprotocol/server-git` | git_status, git_commit |
 | `@modelcontextprotocol/server-memory` | create_entities, create_relations |
 
+> ⚠️ 注意: filesystem 服务器的 `search_files` 的 pattern 是**文件名 glob**
+> （如 `*.py`、`**/*.md`），不是内容搜索。服务器需传授权目录参数:
+> `MCPToolLoader(server_args={"@modelcontextprotocol/server-filesystem": ["/path/to/dir"]})`
+
 **6. 工具冲突处理**：
 
 当两个工具类（含 MCP 分组）注册了同名工具时，`ToolRegistry` 会跳过新工具并打印警告，保留先注册的版本：

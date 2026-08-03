@@ -6,13 +6,16 @@
   "groups": [
     {
       "name": "file_ops",
-      "description": "文件操作工具组",
+      "description": "文件操作工具组 (读写编辑查找, 来自官方 filesystem 服务器)",
       "match": [
         "read_file",
         "write_file",
         "edit_file",
         "list_directory",
+        "directory_tree",
         "search_files",
+        "get_file_info",
+        "list_allowed_directories",
         "create_directory",
         "move_file",
         "delete_file"
