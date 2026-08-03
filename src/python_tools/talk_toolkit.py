@@ -57,9 +57,6 @@ def create_talk_toolkit(pool: Any) -> ToolKit:
 
     tk = ToolKit(name="communication", description="角色间通信工具类")
 
-    # 团队花名册 (静态快照, 注入 talk 的描述中)
-    team_roster = build_team_roster(pool)
-
     def _talk_handler(args: dict[str, Any]) -> str:
         """talk 工具处理函数: 发送消息给指定角色.
 
@@ -98,7 +95,7 @@ def create_talk_toolkit(pool: Any) -> ToolKit:
             args: 无.
 
         返回:
-            当前角色花名册 (与 talk 描述中的格式一致).
+            当前角色花名册 (姓名/role_id/职责/技能).
         """
         roster = build_team_roster(pool)  # 动态构建, 包含新入职角色
         if not roster:
@@ -108,8 +105,9 @@ def create_talk_toolkit(pool: Any) -> ToolKit:
     tk.add_python_tool(
         name="talk",
         description=(
-            "给团队成员发送消息或委托任务. 根据每个人的职责选择合适的人选.\n\n"
-            f"**团队花名册:**\n{team_roster}\n\n"
+            "给团队成员发送消息或委托任务. "
+            "团队当前有哪些成员请先调用 list_roles 获取 (名单是动态的, 可能有新入职). "
+            "根据每个人的职责选择合适的人选后, 用 target 发送.\n"
             "target 参数使用 role_id."
         ),
         input_schema={
@@ -117,7 +115,7 @@ def create_talk_toolkit(pool: Any) -> ToolKit:
             "properties": {
                 "target": {
                     "type": "string",
-                    "description": f"目标人员的 role_id. 可选: {', '.join(pool.list_roles())}",
+                    "description": "目标人员的 role_id (团队名单请先通过 list_roles 获取)",
                 },
                 "message": {
                     "type": "string",
@@ -138,8 +136,7 @@ def create_talk_toolkit(pool: Any) -> ToolKit:
         name="list_roles",
         description=(
             "获取当前团队都有哪些角色 (姓名/role_id/职责/技能). "
-            "当你不确定该找谁处理某件事, 或想知道团队里有哪些人时使用. "
-            "返回格式与 talk 工具的团队花名册一致."
+            "在向同事发消息前, 或不确定该找谁处理某件事时, 先调用此工具查看团队成员."
         ),
         input_schema={"type": "object", "properties": {}},
         handler=_list_roles_handler,
