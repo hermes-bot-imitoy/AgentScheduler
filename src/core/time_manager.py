@@ -417,8 +417,10 @@ class TimeManager:
             self._fired_end = False
             logger.info("TimeManager: 进入第 %d 天", day)
 
-        # 上班事件 (每天第 0 Tick 触发一次)
-        if not self._fired_start and tod == self.shift_start_tick:
+        # 上班事件 (每天触发一次; 条件用区间而非严格 ==, 避免错过 tick 0 窗口
+        # 导致当天 SHIFT_START 永久丢失 — 模拟时钟大步跳/系统挂起恢复时会发生)
+        if (not self._fired_start
+                and self.shift_start_tick <= tod < self.shift_end_tick):
             self._fired_start = True
             self._fire_event(EVENT_SHIFT_START)
 
