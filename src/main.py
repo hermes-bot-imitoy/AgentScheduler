@@ -38,10 +38,33 @@ logging.basicConfig(level=logging.DEBUG, format="%(levelname)s %(name)s: %(messa
 for _noisy in ("requests", "urllib3", "httpcore", "httpx", "openai"):
     logging.getLogger(_noisy).setLevel(logging.WARNING)
 
+# 打印信息同步写入日志文件 (data/main_run.log), 控制台与文件各一份
+LOG_FILE = PROJECT_ROOT / "data" / "main_run.log"
+LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+_file_handler = logging.FileHandler(LOG_FILE, encoding="utf-8")
+_file_handler.setLevel(logging.DEBUG)
+_file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s",
+                                             datefmt="%H:%M:%S"))
+logging.getLogger().addHandler(_file_handler)
+
+# 控制台打印 → 同时写日志文件 (供事后回看, 去掉 ANSI 颜色码)
+def _console_print(msg: str, stream=None) -> None:
+    """打印到控制台, 并把纯文本 (去 ANSI) 同步写日志文件."""
+    print(msg, file=stream)
+    clean = _strip_ansi(msg)
+    if clean.strip():
+        logging.getLogger("console").info(clean.rstrip())
+
 BOLD = "\033[1m"; GREEN = "\033[32m"; YELLOW = "\033[33m"
 RED = "\033[31m"; CYAN = "\033[36m"; MAGENTA = "\033[35m"; RESET = "\033[0m"
 
-ROLE_IDS = ["ceo", "coo", "hr", "cfo"]   # 4 个默认角色
+import re as _re
+
+def _strip_ansi(text: str) -> str:
+    """去掉 ANSI 颜色码, 得到纯文本 (写日志文件用)."""
+    return _re.sub(r"\x1b\[[0-9;]*m", "", text)
+
+ROLE_IDS = ["CEO", "COO", "HR", "CFO"]   # 4 个默认角色 (role_id 全大写)
 
 # 时间参数 (真实时间, 分钟/小时)
 TICK_MINUTES = 10        # 1 Tick = 10 真实分钟
@@ -51,25 +74,25 @@ DAY_BOUNDARY_HOURS = 24  # 跨天 = 24 小时后 (144 Tick)
 
 
 def header(text: str) -> None:
-    print(f"\n{BOLD}{CYAN}{'═' * 62}{RESET}")
-    print(f"{BOLD}{CYAN}  {text}{RESET}")
-    print(f"{BOLD}{CYAN}{'═' * 62}{RESET}\n")
+    _console_print(f"\n{BOLD}{CYAN}{'═' * 62}{RESET}")
+    _console_print(f"{BOLD}{CYAN}  {text}{RESET}")
+    _console_print(f"{BOLD}{CYAN}{'═' * 62}{RESET}\n")
 
 
 def step(text: str) -> None:
-    print(f"{MAGENTA}▶ {text}{RESET}")
+    _console_print(f"{MAGENTA}▶ {text}{RESET}")
 
 
 def info(text: str) -> None:
-    print(f"  {text}")
+    _console_print(f"  {text}")
 
 
 def ok(text: str) -> None:
-    print(f"  {GREEN}✓ {text}{RESET}")
+    _console_print(f"  {GREEN}✓ {text}{RESET}")
 
 
 def warn(text: str) -> None:
-    print(f"  {YELLOW}⚠ {text}{RESET}")
+    _console_print(f"  {YELLOW}⚠ {text}{RESET}")
 
 
 def wait_until(desc: str, predicate, timeout_seconds: float) -> bool:
@@ -128,7 +151,7 @@ def run_one_day(system: AgentSystem, day: int, with_client_task: bool) -> None:
         step("CEO 注册开局任务: Tick 1 (10 分钟后) 与用户沟通项目要求...")
         task = system.time_manager.schedule_task(
             description="与用户沟通项目要求, 收集今天要开发的项目需求",
-            owner_role="ceo",
+            owner_role="CEO",
             target_tick=1,
             day=day,
         )
@@ -197,9 +220,9 @@ def main() -> None:
     header("MAF 作息系统演示 — 真实时间流动 (1 Tick = 10 分钟)")
 
     # ── 1. 开局: 4 个默认角色 + CEO 甲方交流工具 ───────────
-    step("创建 AgentSystem, 加入 4 个默认角色 (ceo/coo/hr/cfo)...")
+    step("创建 AgentSystem, 加入 4 个默认角色 (CEO/COO/HR/CFO)...")
     system = AgentSystem(role_ids=ROLE_IDS)
-    system.get_role("ceo").add_toolkit(create_client_toolkit())
+    system.get_role("CEO").add_toolkit(create_client_toolkit())
     ok(f"角色就绪: {system.pool.list_roles()}")
     ok("CEO 已装备 talk_to_client (与甲方实时交流)")
 
@@ -219,13 +242,13 @@ def main() -> None:
 
         # 一天结束: 询问用户是否继续 (继续 = 等 14 小时后第 2 天上班)
         if not ask_continue():
-            print(f"\n  {YELLOW}停止循环, 系统关闭.{RESET}")
+            _console_print(f"\n  {YELLOW}停止循环, 系统关闭.{RESET}")
             break
         day += 1
         info(f"已确认继续: 第 {day} 天将于约 {DAY_BOUNDARY_HOURS - SHIFT_END_HOURS} 小时后开始.")
 
     system.stop()
-    print(f"\n{BOLD}{GREEN}演示完成 ✓{RESET} (共运行 {day} 天)")
+    _console_print(f"\n{BOLD}{GREEN}演示完成 ✓{RESET} (共运行 {day} 天)")
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@
 用法:
     from src.core.agent_system import AgentSystem
 
-    system = AgentSystem(role_ids=["ceo", "coo", "hr", "cfo"])
+    system = AgentSystem(role_ids=["CEO", "COO", "HR", "CFO"])
     system.start()                     # 启动角色线程 + 时间线程 (Tick 0 = 启动)
     system.trigger(event)              # 投递外部事件
     system.assign_task("coder", task)  # 直接分配任务

@@ -243,7 +243,7 @@ def ceo() -> AgentRole:
     """CEO — 首席执行官 / 用户对齐官."""
     return AgentRole(
         name="林总",
-        role_id="ceo",
+        role_id="CEO",
         title="CEO / 用户对齐官",
         responsibilities="接收用户模糊需求并转化为战略目标、任务完成后汇总产物呈交用户",
         personality=(
@@ -271,7 +271,7 @@ def coo() -> AgentRole:
     """COO — 首席运营官 / 任务调度与缺口识别官."""
     return AgentRole(
         name="陈总",
-        role_id="coo",
+        role_id="COO",
         title="COO / 任务调度官",
         responsibilities="拆解战略目标为工作流图、盘点现有员工能力、发现缺口时向HR发起招聘申请",
         personality=(
@@ -300,7 +300,7 @@ def hr() -> AgentRole:
     """HR — 首席人才官 / 招聘与面试官."""
     return AgentRole(
         name="王人事",
-        role_id="hr",
+        role_id="HR",
         title="CHRO / 首席人才官",
         responsibilities="接收COO招聘申请、调用提示词魔术师生成新Agent配置、面试测试、入职登记",
         personality=(
@@ -329,7 +329,7 @@ def cfo() -> AgentRole:
     """CFO — 首席财务官 / 预算与配额管控官."""
     return AgentRole(
         name="钱财",
-        role_id="cfo",
+        role_id="CFO",
         title="CFO / 预算管控官",
         responsibilities="批复招聘预算、设定Token日薪上限、审批高风险高成本操作",
         personality=(
@@ -358,11 +358,11 @@ def cfo() -> AgentRole:
 
 # Map of template name → factory function
 TEMPLATES: dict[str, "Callable[[], AgentRole]"] = {
-    # Management (default roles)
-    "ceo": ceo,
-    "coo": coo,
-    "hr": hr,
-    "cfo": cfo,
+    # Management (default roles) — role_id 全大写
+    "CEO": ceo,
+    "COO": coo,
+    "HR": hr,
+    "CFO": cfo,
     # Engineering
     "architect": architect,
     "fullstack_dev": fullstack_dev,
@@ -375,8 +375,8 @@ TEMPLATES: dict[str, "Callable[[], AgentRole]"] = {
     "support_agent": support_agent,
 }
 
-# Set of default role_ids that should always be present
-DEFAULT_ROLES: set[str] = {"ceo", "coo", "hr", "cfo"}
+# Set of default role_ids that should always be present (role_id 全大写)
+DEFAULT_ROLES: set[str] = {"CEO", "COO", "HR", "CFO"}
 
 # Name pool for auto-generating person names
 _NAME_POOL: list[str] = [
