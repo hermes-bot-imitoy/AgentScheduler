@@ -424,11 +424,11 @@ class AgentRole:
             # Feed all tool results back to LLM
             messages.append({"role": "assistant", "content": response_text})
             logger.debug("[%s] 工具循环: 追加 LLM 输出消息 (%d 字符): %s",
-                         self.role_id, len(response_text), response_text[:300])
+                         self.role_id, len(response_text), response_text)
             feed_content = "\n\n".join(results_feed)
             messages.append({"role": "user", "content": feed_content})
             logger.debug("[%s] 工具循环: 追加工具结果回喂 (%d 字符): %s",
-                         self.role_id, len(feed_content), feed_content[:300])
+                         self.role_id, len(feed_content), feed_content)
 
         # Max rounds reached — return the LLM's last substantive text (not the raw tool result)
         logger.warning("[%s] Max tool-calling rounds reached for task %s", self.role_id, task.task_id)

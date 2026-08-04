@@ -86,10 +86,10 @@ class DeepSeekLLM:
         if system:
             messages.append({"role": "system", "content": system})
             self._debug("chat: 追加 system 消息 (%d 字符): %s",
-                        len(system), system[:300])
+                        len(system), system)
         messages.append({"role": "user", "content": user})
         self._debug("chat: 追加 user 消息 (%d 字符): %s",
-                    len(user), user[:300])
+                    len(user), user)
 
         response_text, usage = self._call_api(messages, temperature, max_tokens)
         tokens = usage.get("total_tokens", 0) if usage else 0
@@ -115,7 +115,7 @@ class DeepSeekLLM:
             {"role": "user", "content": f"请总结今天的工作日志：\n{log_text}"},
         ]
         self._debug("summarize: 追加 user 消息 (%d 字符): %s",
-                    len(log_text), log_text[:300])
+                    len(log_text), log_text)
 
         response_text, usage = self._call_api(messages, temperature, max_tokens)
         tokens = usage.get("total_tokens", 0) if usage else 0
@@ -181,7 +181,7 @@ class DeepSeekLLM:
 
         if reasoning:
             self._debug("DeepSeek reasoning (%d chars): %s",
-                        len(reasoning), reasoning[:200])
+                        len(reasoning), reasoning)
 
         # If content is empty but thinking was enabled, the model might have
         # put everything in reasoning_content (edge case)
