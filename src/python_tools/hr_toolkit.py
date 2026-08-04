@@ -1,9 +1,9 @@
 """人力资源工具类 (HR ToolKit).
 
 包含:
-  - post_job_posting: 发布招聘启事. 后台将 HR 输入的需求交给"提示词魔术师"(RoleFactory)
-    生成新角色的完整配置, 并注册到角色模板池中.
-  - list_candidates: 列出已生成的候选人(新角色).
+  - post_job_posting: 发布招聘启事. 输入用人需求, 后台完成候选人(新角色)的
+    创建与入职登记, 返回新人的完整档案.
+  - list_candidates: 列出已入职的候选人(角色).
 
 用法:
     from src.python_tools.hr_toolkit import create_hr_toolkit
@@ -34,19 +34,19 @@ def create_hr_toolkit(api_key: str | None = None) -> ToolKit:
     tk = ToolKit(name="hr", description="人力资源工具类: 招聘, 面试, 入职")
 
     def _post_job_posting(args: dict[str, Any]) -> str:
-        """发布招聘启事: 调用提示词魔术师生成新角色.
+        """发布招聘启事: 招聘新角色.
 
         参数:
             args: {"requirement": 用人需求描述, "source": 申请人来源(可选)}
 
         流程:
-            1. HR 输入自然语言的用人需求
-            2. 后台交给 RoleFactory (提示词魔术师) 生成完整角色配置
-            3. 新角色自动注册到模板池
-            4. 返回新角色信息给 HR 确认
+            1. HR 输入自然语言的用人需求 (招聘启事)
+            2. 后台完成候选人创建与入职登记
+            3. 新员工自动注册到公司人才库 (模板池)
+            4. 返回新员工档案给 HR 确认
 
         返回:
-            新角色的 JSON 信息 (role_id, 姓名, 职位, 技能等).
+            新员工的 JSON 档案 (role_id, 姓名, 职位, 技能等).
         """
         requirement = args.get("requirement", "").strip()
         if not requirement:
@@ -54,12 +54,12 @@ def create_hr_toolkit(api_key: str | None = None) -> ToolKit:
 
         from src.core.role_factory import RoleFactory
 
-        # 调用"提示词魔术师"生成新角色
+        # 后台招聘流程: 根据招聘启事生成新员工档案 (HR 无需了解内部实现)
         factory = RoleFactory(api_key=api_key)
         try:
             new_role = factory.create_role(requirement)
         except Exception as exc:
-            logger.error("提示词魔术师生成角色失败: %s", exc)
+            logger.error("招聘流程处理失败: %s", exc)
             return f"错误: 招聘启事处理失败 - {exc}"
 
         # 返回新角色的完整信息
@@ -100,8 +100,8 @@ def create_hr_toolkit(api_key: str | None = None) -> ToolKit:
     tk.add_python_tool(
         name="post_job_posting",
         description=(
-            "发布招聘启事. 输入用人需求, 后台会调用提示词魔术师自动生成新角色的完整配置 "
-            "(包括 role_id, 姓名, 职位, 性格, 技能, 关键词), 并注册到角色模板池中. "
+            "发布招聘启事. 输入用人需求, 完成候选人招聘: 后台会自动创建新员工的完整档案 "
+            "(包括 role_id, 姓名, 职位, 性格, 技能, 关键词), 并办理入职登记. "
             "示例需求: '需要一位精通 Rust 的后端工程师, 熟悉 gRPC 和 PostgreSQL'"
         ),
         input_schema={

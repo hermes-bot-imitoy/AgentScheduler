@@ -393,7 +393,7 @@ tk.tool_names / tk.tool_count / tk.get_tool(name) / __iter__ / __contains__
 | 工具类 | 工具 | 用途 |
 |--------|------|------|
 | `talk_toolkit` | `talk(target, message, urgency)` | 角色间异步通信（投递到对方队列） |
-| `hr_toolkit` | `post_job_posting(requirement)` / `list_candidates()` | HR 发布招聘 → RoleFactory 生成角色 |
+| `hr_toolkit` | `post_job_posting(requirement)` / `list_candidates()` | 发布招聘启事 / 列出候选人（后台完成新角色创建与入职登记） |
 | `memory_toolkit` | `summary(content, day)` / `write_note(title, content)` / `edit_note` / `list_notes` / `read_note` | 每日总结（保存后切 OFF_DUTY）+ 笔记 |
 | `time_toolkit` | `get_time()` / `take_rest(ticks)` | 查看作息时间 / 休息（非阻塞: 判断当前 Tick 是否达到目标, 状态自动恢复） |
 | `task_toolkit` | `create_task(description, tick, day)` / `list_tasks()` / `edit_task(task_id, ...)` / `delete_task(task_id)` | 定时任务（Tick 提醒，定向投递） |
