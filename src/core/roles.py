@@ -190,6 +190,14 @@ class AgentRole:
         # 当前是第几天 (作息系统, 从共享 TimeManager 获取)
         parts.append(f"今天是第 {self.time_manager.day_number()} 天。")
 
+        # 通用工作规则 (所有角色生效): 空闲即休息, 不主动打扰他人
+        parts.append(
+            "如果当前没有任务，你可以直接调用休息。"
+            "并且你需要注意：不要在不应该打扰其他人的时候向其他人发送信息，"
+            "只有必要时才会发送。因此当你没有任务的时候，不要询问其它人，"
+            "直接休息即可。当有事情的时候会自动提醒你的。"
+        )
+
         if self.system_prompt_extra:
             parts.append(self.system_prompt_extra)
 
