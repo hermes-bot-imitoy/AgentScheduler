@@ -375,8 +375,9 @@ TEMPLATES: dict[str, "Callable[[], AgentRole]"] = {
     "support_agent": support_agent,
 }
 
-# Set of default role_ids that should always be present (role_id 全大写)
-DEFAULT_ROLES: set[str] = {"CEO", "COO", "HR", "CFO"}
+# Set of default role_ids that should always be present (role_id 全大写).
+# CFO 模板保留在 TEMPLATES 中, 暂不列入默认集合 (初级阶段不启用, 后续再加)
+DEFAULT_ROLES: set[str] = {"CEO", "COO", "HR"}
 
 # Name pool for auto-generating person names
 _NAME_POOL: list[str] = [

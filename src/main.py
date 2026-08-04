@@ -64,7 +64,7 @@ def _strip_ansi(text: str) -> str:
     """去掉 ANSI 颜色码, 得到纯文本 (写日志文件用)."""
     return _re.sub(r"\x1b\[[0-9;]*m", "", text)
 
-ROLE_IDS = ["CEO", "COO", "HR", "CFO"]   # 4 个默认角色 (role_id 全大写)
+ROLE_IDS = ["CEO", "COO", "HR"]   # 默认角色 (role_id 全大写); CFO 暂不启用, 后续再加
 
 # 时间参数 (真实时间, 分钟/小时)
 TICK_MINUTES = 10        # 1 Tick = 10 真实分钟
@@ -179,12 +179,14 @@ def run_one_day(system: AgentSystem, day: int, with_client_task: bool) -> None:
     results = system.trigger(spam)
     info(f"LOW 过滤结果: { {k: v['accepted'] for k, v in results.items()} }")
 
+    """
     step("投递 HIGH 工作工单 (新 PR 待处理)...")
     work = Event(source="github", event_type="new_pr", priority=Priority.HIGH,
                  payload={"pr_number": 188, "title": "fix: login token NPE", "urgent": True})
     results = system.trigger(work)
     accepted = [rid for rid, r in results.items() if r["accepted"]]
     info(f"HIGH 工单被接受: {accepted}")
+    """
 
     # ── 等待下班 (Tick 60 = 10 小时后, SHIFT_END 自动触发) ─
     step("等待下班... (Tick 60 = 10 小时后, SHIFT_END 自动触发)")
@@ -219,8 +221,8 @@ def run_one_day(system: AgentSystem, day: int, with_client_task: bool) -> None:
 def main() -> None:
     header("MAF 作息系统演示 — 真实时间流动 (1 Tick = 10 分钟)")
 
-    # ── 1. 开局: 4 个默认角色 + CEO 甲方交流工具 ───────────
-    step("创建 AgentSystem, 加入 4 个默认角色 (CEO/COO/HR/CFO)...")
+    # ── 1. 开局: 默认角色 (CEO/COO/HR) + CEO 甲方交流工具 ──
+    step(f"创建 AgentSystem, 加入 {len(ROLE_IDS)} 个默认角色 ({'/'.join(ROLE_IDS)})...")
     system = AgentSystem(role_ids=ROLE_IDS)
     system.get_role("CEO").add_toolkit(create_client_toolkit())
     ok(f"角色就绪: {system.pool.list_roles()}")

@@ -342,10 +342,10 @@ system.stop()
 文件: `src/core/role_templates.py`
 
 - `TEMPLATES`：12 个模板（4 管理 + 8 业务）
-- `DEFAULT_ROLES = ["ceo", "coo", "hr", "cfo"]`
+- `DEFAULT_ROLES = ["CEO", "COO", "HR"]`（CFO 模板保留但暂不默认启用，后续再加）
 - `get_template(name) -> AgentRole`：克隆模板
 - `create_all_roles() -> list[AgentRole]`：全部 12 个
-- `create_default_roles() -> list[AgentRole]`：4 个管理角色
+- `create_default_roles() -> list[AgentRole]`：默认角色（当前为 CEO/COO/HR，CFO 后续再加）
 
 文件: `src/core/role_factory.py`
 
