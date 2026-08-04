@@ -14,15 +14,11 @@
 from __future__ import annotations
 
 import logging
-import time as time_module
 from typing import Any
 
 from src.core.tools import ToolKit
 
 logger = logging.getLogger(__name__)
-
-# 休息等待的最大真实秒数 (防止真实时钟下长时间阻塞)
-REST_MAX_WAIT_SECONDS = 120
 
 
 def create_time_toolkit() -> ToolKit:
@@ -77,8 +73,9 @@ def create_time_toolkit() -> ToolKit:
         if not (1 <= ticks <= 60):
             return "错误: 'ticks' 必须在 1~60 范围内."
 
-        # 休息期间状态为 ON_DUTY_IDLE
+        # 记录调用前状态, 休息期间置为 ON_DUTY_IDLE
         from src.core.types import AgentState
+        prev_state = role.state if role is not None else None
         if role is not None and role.state != AgentState.ON_DUTY_IDLE:
             role.state = AgentState.ON_DUTY_IDLE
             logger.info("[%s] 开始休息 %d Ticks (状态 ON_DUTY_IDLE)", role.role_id, ticks)
@@ -86,17 +83,20 @@ def create_time_toolkit() -> ToolKit:
         start_tick = manager.current_tick()
         target_tick = start_tick + ticks
 
-        # 等待时间推进到目标 Tick (模拟时钟由外部推进, 真实时钟 1 Tick = 10 分钟)
-        waited = 0.0
-        while manager.current_tick() < target_tick:
-            if waited >= REST_MAX_WAIT_SECONDS:
-                return (f"休息中断: 等待超过 {REST_MAX_WAIT_SECONDS} 秒仍未到达目标 Tick "
-                        f"(start={start_tick}, target={target_tick}, now={manager.current_tick()}). "
-                        "已恢复工作.")
-            time_module.sleep(1)
-            waited += 1.0
+        # 非阻塞: 只判断当前 Tick 是否已达到目标.
+        # 真实时钟 1 Tick = 10 分钟, 不在这里等待; 未到目标就保持休息状态,
+        # 到达后由下次调用/任务事件自然恢复.
+        if manager.current_tick() >= target_tick:
+            # 休息完成 → 恢复调用前状态
+            if role is not None:
+                role.state = prev_state
+            return f"休息结束: 从 Tick {start_tick} 休息到 Tick {target_tick} (共 {ticks} Ticks). 已恢复工作."
 
-        return f"休息结束: 从 Tick {start_tick} 休息到 Tick {target_tick} (共 {ticks} Ticks). 已恢复工作."
+        # 尚未到达目标 Tick → 状态改回, 提示稍后自动恢复
+        if role is not None:
+            role.state = prev_state
+        return (f"休息中: 当前 Tick {manager.current_tick()} 未达到目标 Tick {target_tick}, "
+                f"休息 {ticks} Ticks 尚未结束, 到达后会自动恢复.")
 
     tk.add_python_tool(
         name="get_time",
