@@ -46,17 +46,30 @@ class DeepSeekLLM:
         base_url: Optional[str] = None,
         model: Optional[str] = None,
         thinking: Optional[bool] = None,
+        label: Optional[str] = None,
     ):
         self.api_key = api_key or DEEPSEEK_API_KEY
         self.base_url = (base_url or DEEPSEEK_BASE_URL).rstrip("/")
         self.model = model or DEEPSEEK_MODEL
         self.thinking = thinking if thinking is not None else DEEPSEEK_THINKING
+        # 角色标识: DEBUG 日志前缀, 便于多角色并发时区分是谁在调 API
+        self.label = label or ""
 
         if not self.api_key:
             raise ValueError(
                 "DeepSeek API key is required. Set DEEPSEEK_API_KEY env var "
                 "or pass api_key= to DeepSeekLLM()."
             )
+
+    # ── 调试日志 (带角色前缀) ─────────────────────────────
+
+    def _debug(self, msg: str, *args) -> None:
+        """打 DEBUG 日志, 消息前加角色标识 (如 [ceo]), 无角色则不加."""
+        if self.label:
+            # 前缀拼进格式串: 占位符总数 = 1(label) + msg 自身占位符
+            logger.debug("[%s] " + msg, self.label, *args)
+        else:
+            logger.debug(msg, *args)
 
     # ── Public API (same interface as MockLLM) ─────────────
 
@@ -72,11 +85,11 @@ class DeepSeekLLM:
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
-            logger.debug("chat: 追加 system 消息 (%d 字符): %s",
-                         len(system), system[:300])
+            self._debug("chat: 追加 system 消息 (%d 字符): %s",
+                        len(system), system[:300])
         messages.append({"role": "user", "content": user})
-        logger.debug("chat: 追加 user 消息 (%d 字符): %s",
-                     len(user), user[:300])
+        self._debug("chat: 追加 user 消息 (%d 字符): %s",
+                    len(user), user[:300])
 
         response_text, usage = self._call_api(messages, temperature, max_tokens)
         tokens = usage.get("total_tokens", 0) if usage else 0
@@ -101,8 +114,8 @@ class DeepSeekLLM:
             },
             {"role": "user", "content": f"请总结今天的工作日志：\n{log_text}"},
         ]
-        logger.debug("summarize: 追加 user 消息 (%d 字符): %s",
-                     len(log_text), log_text[:300])
+        self._debug("summarize: 追加 user 消息 (%d 字符): %s",
+                    len(log_text), log_text[:300])
 
         response_text, usage = self._call_api(messages, temperature, max_tokens)
         tokens = usage.get("total_tokens", 0) if usage else 0
@@ -143,7 +156,7 @@ class DeepSeekLLM:
             if max_tokens < 1024:
                 payload["max_tokens"] = 1024
 
-        logger.debug(
+        self._debug(
             "DeepSeek API call: model=%s messages=%d thinking=%s",
             self.model, len(messages), self.thinking,
         )
@@ -167,7 +180,8 @@ class DeepSeekLLM:
         reasoning = message.get("reasoning_content", "")
 
         if reasoning:
-            logger.debug("DeepSeek reasoning (%d chars): %s", len(reasoning), reasoning[:200])
+            self._debug("DeepSeek reasoning (%d chars): %s",
+                        len(reasoning), reasoning[:200])
 
         # If content is empty but thinking was enabled, the model might have
         # put everything in reasoning_content (edge case)
@@ -182,7 +196,7 @@ class DeepSeekLLM:
 
         # Log token breakdown when thinking is on
         if usage and self.thinking:
-            logger.debug(
+            self._debug(
                 "DeepSeek tokens: prompt=%s completion=%s reasoning=%s total=%s",
                 usage.get("prompt_tokens", "?"),
                 usage.get("completion_tokens", "?"),

@@ -544,7 +544,8 @@ class RolePool:
         for role_id, role in self._roles.items():
             role._running = True
             role._pool = self  # back-reference for talk tool
-            role._llm = DeepSeekLLM(api_key=self._llm_api_key, model=self._llm_model)
+            role._llm = DeepSeekLLM(api_key=self._llm_api_key, model=self._llm_model,
+                                    label=role.role_id)  # DEBUG 日志带角色前缀
             role._register_talk_tool()  # auto-register inter-role communication
             fut = self._executor.submit(self._role_loop, role)
             self._futures[role_id] = fut

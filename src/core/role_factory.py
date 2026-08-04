@@ -66,7 +66,7 @@ class RoleFactory:
         api_key: Optional[str] = None,
         model: Optional[str] = None,
     ):
-        self._llm = DeepSeekLLM(api_key=api_key, model=model)
+        self._llm = DeepSeekLLM(api_key=api_key, model=model, label="role_factory")
 
     def create_role(self, requirement: str) -> AgentRole:
         """Create a new role from a hiring requirement description.
