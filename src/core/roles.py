@@ -78,7 +78,6 @@ class AgentRole:
     skills: list[str] = field(default_factory=list)        # e.g. ["Python", "Go", "K8s"]
     system_prompt_extra: str = ""                          # appended to base system prompt
     is_default: bool = False                               # marked as a default/critical role
-    max_tool_rounds: int = 10                              # 工具调用循环上限 (防无限循环)
 
     # ── Event filter state (per-role) ─────────────────────
     state: AgentState = AgentState.ON_DUTY_IDLE            # role-specific lifecycle
@@ -391,10 +390,13 @@ class AgentRole:
         ]
 
         total_tokens = 0
-        max_rounds = self.max_tool_rounds  # 工具调用轮次上限 (防无限循环)
-        last_assistant_text: str = ""  # 最近一次 LLM 的正文回复 (不含 tool_call 块)
+        round_no = 0  # 工具调用轮次计数 (仅用于 DEBUG 日志, 不限制循环)
 
-        for _round in range(max_rounds):
+        # 工具调用循环: 无限轮次, 直到 LLM 返回纯文本终答 (无 tool_call 块).
+        # 无上限截断 — LLM 每轮必须调工具才会继续, 迟早给出终答; 若每轮都调工具
+        # 则持续循环 (DEBUG 日志可观察), 由 LLM 自行收敛.
+        while True:
+            round_no += 1
             # Build conversation for this round
             msgs_for_api = [{"role": m["role"], "content": m["content"]} for m in messages]
 
@@ -407,12 +409,9 @@ class AgentRole:
 
             if not tool_calls:
                 # Final response — no tool call
+                logger.debug("[%s] 工具循环: 第 %d 轮收到终答 (无工具调用), 任务完成",
+                             self.role_id, round_no)
                 return response_text, total_tokens
-
-            # 记录 LLM 正文 (去掉 tool_call 块), 供达到上限时兜底返回
-            plain = response_text.split("```tool_call")[0].strip()
-            if plain:
-                last_assistant_text = plain
 
             # 顺序执行本轮的每个工具调用
             results_feed: list[str] = []
@@ -429,6 +428,10 @@ class AgentRole:
 
                 results_feed.append(f"Tool result ({tool_name}):\n{tool_result}")
 
+            # 提醒: 工具调用轮次较多时打 DEBUG 警告 (不截断, 仅供观察)
+            logger.debug("[%s] 工具循环: 第 %d 轮仍包含工具调用, 继续下一轮 (无轮次上限)",
+                         self.role_id, round_no)
+
             # Feed all tool results back to LLM
             messages.append({"role": "assistant", "content": response_text})
             logger.debug("[%s] 工具循环: 追加 LLM 输出消息 (%d 字符): %s",
@@ -437,12 +440,6 @@ class AgentRole:
             messages.append({"role": "user", "content": feed_content})
             logger.debug("[%s] 工具循环: 追加工具结果回喂 (%d 字符): %s",
                          self.role_id, len(feed_content), feed_content)
-
-        # Max rounds reached — return the LLM's last substantive text (not the raw tool result)
-        logger.warning("[%s] Max tool-calling rounds reached for task %s", self.role_id, task.task_id)
-        if last_assistant_text:
-            return last_assistant_text + "\n(注: 工具调用已达轮次上限, 以上为处理结果.)", total_tokens
-        return f"(工具调用已达轮次上限, 共调用 {max_rounds} 轮)", total_tokens
 
     @staticmethod
     def _parse_tool_calls(response: str) -> list[tuple[str, dict[str, Any]]]:
