@@ -197,6 +197,12 @@ class AgentRole:
             "直接休息即可。当有事情的时候会自动提醒你的。"
         )
 
+        # 沟通守时规则 (所有角色生效): 约好的沟通必须在指定时间进行
+        parts.append(
+            "如果你有与其他人沟通的任务，请务必保证在指定时间与其沟通，"
+            "不能提前也不能延后，因为其他人会认为你应该在此时与他沟通。"
+        )
+
         if self.system_prompt_extra:
             parts.append(self.system_prompt_extra)
 
