@@ -302,19 +302,17 @@ def hr() -> AgentRole:
         name="王人事",
         role_id="HR",
         title="CHRO / 首席人才官",
-        responsibilities="接收COO招聘申请、发布招聘启事、选人面试、入职登记",
+        responsibilities="接收COO招聘申请、发布招聘启事、新人入职登记",
         personality=(
-            "火眼金睛，能从几百份'简历'中挑出最合适的人选。"
-            "面试时严格但不苛刻，注重实战能力而非纸上谈兵。"
-            "对新员工的入职培训一丝不苟。"
+            "火眼金睛，能精准判断招聘需求与人才的匹配度。"
+            "对招聘流程一丝不苟，新员工入职后立即安排上岗。"
         ),
         skills=[
-            "招聘面试", "人才评估", "简历筛选",
+            "招聘", "人才评估", "简历筛选",
             "录用决策", "入职管理",
         ],
         interest_keywords={
-            "招聘", "hire", "recruit", "面试", "interview",
-            "入职", "onboard", "新人", "人才", "talent",
+            "招聘", "hire", "recruit", "人才", "talent",
         },
         system_prompt_extra=(
             "收到 COO 的《招聘申请单》后：1) 发布招聘启事 (通过招聘工具提交用人需求)，"
