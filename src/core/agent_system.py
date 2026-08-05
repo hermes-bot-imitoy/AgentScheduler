@@ -87,6 +87,12 @@ class AgentSystem:
             for factory in DEFAULT_TOOLKITS.values():
                 role.add_toolkit(factory())
 
+        # 自动装配默认 MCP 工具组 (如 file_ops 文件操作) 到角色个人电脑
+        if self.auto_toolkits:
+            from src.python_tools import DEFAULT_MCP_GROUPS, _MCP_MANAGER
+            for group in DEFAULT_MCP_GROUPS:
+                _MCP_MANAGER.install_group_defaults(role, group)
+
         self.pool.add_role(role)
         logger.info("AgentSystem: 角色已注册 %s (%s)", role.role_id, role.name)
         return role

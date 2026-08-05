@@ -376,11 +376,6 @@ class AgentRole:
             from src.python_tools.computer_toolkit import bind_computer_to_toolkit
             bind_computer_to_toolkit(toolkit, self)
 
-        # 文件操作工具类自动绑定该角色 (文件落在角色自己的电脑上)
-        if toolkit.name == "file":
-            from src.python_tools.file_toolkit import bind_file_to_toolkit
-            bind_file_to_toolkit(toolkit, self)
-
         return self._tools.add_toolkit(toolkit)
 
     @property
@@ -620,6 +615,11 @@ class RolePool:
         from src.python_tools import DEFAULT_TOOLKITS
         for factory in DEFAULT_TOOLKITS.values():
             role.add_toolkit(factory())
+
+        # 装配默认 MCP 工具组 (新入职员工同样自动获得, 如 file_ops)
+        from src.python_tools import DEFAULT_MCP_GROUPS, _MCP_MANAGER
+        for group in DEFAULT_MCP_GROUPS:
+            _MCP_MANAGER.install_group_defaults(role, group)
 
         # 与 start() 相同的单角色启动逻辑
         role._running = True

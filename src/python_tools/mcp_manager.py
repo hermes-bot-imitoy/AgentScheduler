@@ -143,6 +143,40 @@ class MCPManager:
 
     # ── 角色工具管理 ──────────────────────────────────────
 
+    def install_group_defaults(self, role: Any, group: str) -> list[str]:
+        """把指定组的全部 MCP 工具作为默认工具安装到角色.
+
+        供默认加载使用: 角色加入/启动时自动装配某个 MCP 工具组
+        (如 file_ops 文件操作), 无需 mcp_search/mcp_add.
+
+        参数:
+            role:  AgentRole 实例.
+            group: 工具组名 (如 "file_ops", 与 mcp_group_rules.json 分组一致).
+
+        返回:
+            成功安装的工具名列表 (跳过已存在/失败的).
+        """
+        try:
+            groups = self.ensure_loaded()
+        except Exception:
+            logger.exception("MCP 默认工具组加载失败: %s", group)
+            return []
+        tk = groups.get(group)
+        if tk is None:
+            logger.warning("MCP 默认工具组不存在: %s (可用: %s)", group, sorted(groups))
+            return []
+        installed = []
+        for td in tk:
+            try:
+                r = self.add_tool(role, td.name)
+                if not r.startswith("错误"):
+                    installed.append(td.name)
+            except Exception:
+                logger.exception("[%s] MCP 默认工具安装失败: %s", role.role_id, td.name)
+        logger.info("[%s] MCP 默认工具组 '%s' 已安装 %d 个工具: %s",
+                    role.role_id, group, len(installed), installed)
+        return installed
+
     def add_tool(self, role: Any, tool_name: str) -> str:
         """为角色安装一个本地已有的 MCP 工具 (安装到该角色的个人电脑).
 
