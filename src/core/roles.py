@@ -343,6 +343,11 @@ class AgentRole:
             from src.python_tools.mcp_manager import bind_mcp_manager_to_toolkit
             bind_mcp_manager_to_toolkit(toolkit, self)
 
+        # HR 工具类自动绑定该角色 (发布招聘后新员工加入团队, 需要 RolePool 引用)
+        if toolkit.name == "hr":
+            from src.python_tools.hr_toolkit import bind_role_to_toolkit
+            bind_role_to_toolkit(toolkit, self)
+
         return self._tools.add_toolkit(toolkit)
 
     @property
@@ -558,6 +563,41 @@ class RolePool:
         if role.role_id in self._roles:
             raise ValueError(f"Role '{role.role_id}' already exists")
         self._roles[role.role_id] = role
+
+    def add_role_and_start(self, role: AgentRole) -> AgentRole:
+        """动态入职: 注册新角色并立即启动其 worker 线程 (招聘流程用).
+
+        与 add_role + start() 对单个角色的处理等价:
+          1. 注册进 _roles (已存在则报错)
+          2. 装配默认工具 (memory/time/task) + talk 通信工具
+          3. 创建 LLM 实例 (带角色前缀)
+          4. 提交 worker 线程
+
+        参数:
+            role: 新入职的 AgentRole.
+
+        返回:
+            已启动的 role (供调用方链式使用).
+        """
+        if role.role_id in self._roles:
+            raise ValueError(f"Role '{role.role_id}' already exists")
+        self._roles[role.role_id] = role
+
+        # 装配默认工具 (与 AgentSystem 的 auto_toolkits 一致)
+        from src.python_tools import DEFAULT_TOOLKITS
+        for factory in DEFAULT_TOOLKITS.values():
+            role.add_toolkit(factory())
+
+        # 与 start() 相同的单角色启动逻辑
+        role._running = True
+        role._pool = self  # back-reference for talk tool
+        role._llm = DeepSeekLLM(api_key=self._llm_api_key, model=self._llm_model,
+                                label=role.role_id)  # DEBUG 日志带角色前缀
+        role._register_talk_tool()  # auto-register inter-role communication
+        fut = self._executor.submit(self._role_loop, role)
+        self._futures[role.role_id] = fut
+        logger.info("Role '%s' (新入职) worker started", role.role_id)
+        return role
 
     def get_role(self, name: str) -> AgentRole:
         if name not in self._roles:
