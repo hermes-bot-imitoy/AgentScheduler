@@ -376,6 +376,11 @@ class AgentRole:
             from src.python_tools.computer_toolkit import bind_computer_to_toolkit
             bind_computer_to_toolkit(toolkit, self)
 
+        # 文件操作工具类自动绑定该角色 (文件落在角色自己的电脑上)
+        if toolkit.name == "file":
+            from src.python_tools.file_toolkit import bind_file_to_toolkit
+            bind_file_to_toolkit(toolkit, self)
+
         return self._tools.add_toolkit(toolkit)
 
     @property

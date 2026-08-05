@@ -264,7 +264,7 @@ class PodmanComputer(Computer):
         )
 
     def _ensure_container(self) -> None:
-        """确保容器存在并运行 (不存在则创建)."""
+        """确保容器存在并运行 (不存在则创建), 并创建工作目录."""
         r = self._pod("ps", "-a", "--filter", f"name={self.container_name}", "--format", "{{.Names}}")
         if self.container_name not in (r.stdout or ""):
             self._pod("run", "-d", "--name", self.container_name, self.image,
@@ -272,6 +272,9 @@ class PodmanComputer(Computer):
         r = self._pod("ps", "--filter", f"name={self.container_name}", "--format", "{{.Names}}")
         if self.container_name not in (r.stdout or ""):
             self._pod("start", self.container_name)
+        # 确保工作目录存在 (alpine 默认无 /home/agent)
+        self._pod("exec", self.container_name, "sh", "-c",
+                  f"mkdir -p '{self.workdir}'")
 
     def power_on(self) -> str:
         if self._fallback is not None:
@@ -320,9 +323,12 @@ class PodmanComputer(Computer):
     def write_file(self, path: str, content: str) -> str:
         if self._fallback is not None:
             return self._fallback.write_file(path, content)
-        # 用 heredoc 写入容器内文件
+        # 用 heredoc 写入容器内文件: $(dirname) 必须可展开 → 用双引号包 $(),
+        # 内部路径用单引号保护空格
         escaped = content.replace("'", "'\\''")
-        return self.run_command(f"mkdir -p '$(dirname '{path}')' && cat > '{path}' <<'EOF'\n{escaped}\nEOF")
+        return self.run_command(
+            f"mkdir -p \"$(dirname '{path}')\" && cat > '{path}' <<'EOF'\n{escaped}\nEOF"
+        )
 
     def list_dir(self, path: str = "") -> str:
         if self._fallback is not None:

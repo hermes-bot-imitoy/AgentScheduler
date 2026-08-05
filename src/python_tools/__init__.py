@@ -30,6 +30,7 @@ from src.python_tools.task_toolkit import create_task_toolkit
 from src.python_tools.time_toolkit import create_time_toolkit
 from src.python_tools.mcp_manager import MCPManager, create_mcp_manager_toolkit
 from src.python_tools.computer_toolkit import create_computer_toolkit
+from src.python_tools.file_toolkit import create_file_toolkit
 
 # 全局共享 MCP 管理器 (懒加载: 首次调用 mcp_* 工具时才连接服务器).
 # 所有角色共享同一份工具池, 但每个角色 add_toolkit 时拿到独立的工具类实例
@@ -42,6 +43,7 @@ DEFAULT_TOOLKITS: dict[str, Callable[[], object]] = {
     "memory": create_memory_toolkit,
     "time": create_time_toolkit,
     "task": create_task_toolkit,
-    "computer": create_computer_toolkit,          # run_command / computer_status / power_off
+    "computer": create_computer_toolkit,          # run_command / computer_status / reboot
+    "file": create_file_toolkit,                  # 文件操作 (操作角色自己电脑上的文件)
     "mcp_manager": lambda: create_mcp_manager_toolkit(_MCP_MANAGER),
 }
