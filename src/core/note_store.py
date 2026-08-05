@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -26,15 +26,19 @@ class NoteStore:
     """文件型笔记存储. 每个角色实例独立目录.
 
     参数:
-        base_dir: 存储根目录 (默认 ./data/notes)
+        base_dir: 存储根目录 (默认 ./data/notes) — 无 computer 时的本地回退路径
         role_id:  角色标识, 用于隔离目录 (可为空, 由 AgentRole 传入)
+        computer: 个人电脑实例 (可选). 提供后笔记/总结读写到电脑工作目录
+                  <workdir>/notes/ 下 (默认 Podman 电脑), 否则落到本地 base_dir.
     """
 
-    def __init__(self, base_dir: str = "./data/notes", role_id: str = ""):
+    def __init__(self, base_dir: str = "./data/notes", role_id: str = "",
+                 computer: Any = None):
         self._base = Path(base_dir)
         self.role_id = role_id
-        self._dir = self._base / (role_id or "shared")
-        self._dir.mkdir(parents=True, exist_ok=True)
+        self._computer = computer
+        self._local_dir = self._base / (role_id or "shared")
+        self._local_dir.mkdir(parents=True, exist_ok=True)
 
     # ── 路径工具 ──────────────────────────────────────────
 
@@ -44,8 +48,55 @@ class NoteStore:
         cleaned = re.sub(r'[\\/:*?"<>|#%\s]+', "_", title.strip())
         return cleaned or "untitled"
 
-    def _note_path(self, title: str) -> Path:
-        return self._dir / f"{self._sanitize_title(title)}.md"
+    @property
+    def _dir(self) -> Path:
+        """当前使用的目录 (电脑 workdir/notes 或本地)."""
+        if self._computer is not None:
+            return Path(self._computer.workdir) / "notes"
+        return self._local_dir
+
+    def _note_path(self, title: str) -> str:
+        """笔记路径 (字符串, 供 computer 文件接口使用)."""
+        return str(self._dir / f"{self._sanitize_title(title)}.md")
+
+    def _summary_path(self, day: int) -> str:
+        return str(self._dir / f"_summary_day_{day}.md")
+
+    # ── 底层读写 (走电脑或本地) ──────────────────────────
+
+    def _write(self, path: str, content: str) -> None:
+        if self._computer is not None:
+            self._computer.write_file(path, content)
+        else:
+            p = Path(path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(content, encoding="utf-8")
+
+    def _read(self, path: str) -> Optional[str]:
+        if self._computer is not None:
+            r = self._computer.read_file(path)
+            if r.startswith("文件不存在") or r.startswith("错误:"):
+                return None
+            return r
+        p = Path(path)
+        if not p.exists():
+            return None
+        return p.read_text(encoding="utf-8")
+
+    def _list_md_files(self) -> list[Path]:
+        """列出 notes 目录下所有 .md 文件 (仅文件名, 按名排序)."""
+        if self._computer is not None:
+            listing = self._computer.list_dir(str(self._dir))
+            names = []
+            for line in listing.splitlines():
+                # ls 输出取最后一列文件名
+                name = line.split()[-1] if line.split() else ""
+                if name.endswith(".md"):
+                    names.append(Path(name))
+            return sorted(names)
+        if not self._dir.exists():
+            return []
+        return sorted(p for p in self._dir.glob("*.md"))
 
     # ── 笔记操作 ──────────────────────────────────────────
 
@@ -60,9 +111,9 @@ class NoteStore:
             保存路径.
         """
         path = self._note_path(title)
-        path.write_text(content, encoding="utf-8")
-        logger.info("[%s] 笔记已写入: %s", self.role_id, path.name)
-        return str(path)
+        self._write(path, content)
+        logger.info("[%s] 笔记已写入: %s", self.role_id, Path(path).name)
+        return path
 
     def edit_note(self, title: str, content: str) -> str:
         """编辑已有笔记 (覆盖内容). 不存在则创建.
@@ -75,9 +126,9 @@ class NoteStore:
             保存路径.
         """
         path = self._note_path(title)
-        path.write_text(content, encoding="utf-8")
-        logger.info("[%s] 笔记已编辑: %s", self.role_id, path.name)
-        return str(path)
+        self._write(path, content)
+        logger.info("[%s] 笔记已编辑: %s", self.role_id, Path(path).name)
+        return path
 
     def list_notes(self) -> list[str]:
         """列出所有笔记标题 (不含每日总结). 按文件名排序.
@@ -86,7 +137,7 @@ class NoteStore:
             标题字符串列表.
         """
         titles = []
-        for p in sorted(self._dir.glob("*.md")):
+        for p in self._list_md_files():
             if p.name.startswith("_summary_"):
                 continue  # 跳过总结文件
             titles.append(p.stem)
@@ -102,16 +153,14 @@ class NoteStore:
             内容字符串, 不存在返回 None.
         """
         path = self._note_path(title)
-        if not path.exists():
-            return None
-        return path.read_text(encoding="utf-8")
+        return self._read(path)
 
     def delete_note(self, title: str) -> bool:
         """删除笔记. 返回是否删除成功."""
         path = self._note_path(title)
-        if path.exists():
-            path.unlink()
-            logger.info("[%s] 笔记已删除: %s", self.role_id, path.name)
+        if self._read(path) is not None:
+            self._write(path, "")  # 无删除接口, 置空文件
+            logger.info("[%s] 笔记已删除: %s", self.role_id, Path(path).name)
             return True
         return False
 
@@ -128,10 +177,10 @@ class NoteStore:
             保存路径.
         """
         d = day or 1
-        path = self._dir / f"_summary_day_{d}.md"
-        path.write_text(content, encoding="utf-8")
-        logger.info("[%s] 第 %d 天总结已保存: %s", self.role_id, d, path.name)
-        return str(path)
+        path = self._summary_path(d)
+        self._write(path, content)
+        logger.info("[%s] 第 %d 天总结已保存: %s", self.role_id, d, Path(path).name)
+        return path
 
     def get_summary(self, day: Optional[int] = None) -> Optional[str]:
         """读取指定天的总结.
@@ -143,10 +192,7 @@ class NoteStore:
             总结内容, 不存在返回 None.
         """
         d = day or 1
-        path = self._dir / f"_summary_day_{d}.md"
-        if not path.exists():
-            return None
-        return path.read_text(encoding="utf-8")
+        return self._read(self._summary_path(d))
 
     def get_latest_summary(self, before_day: Optional[int] = None) -> Optional[str]:
         """读取最近一次总结 (用于下一天冷启动).
@@ -157,13 +203,17 @@ class NoteStore:
         返回:
             最近总结内容, 没有则返回 None.
         """
-        candidates = sorted(self._dir.glob("_summary_day_*.md"), reverse=True)
+        candidates = sorted(self._list_md_files(), reverse=True)
         for p in candidates:
             # 文件名格式: _summary_day_<N>.md
+            if not p.name.startswith("_summary_day_"):
+                continue
             try:
                 d = int(p.name[len("_summary_day_"):-len(".md")])
             except ValueError:
                 continue
             if before_day is None or d < before_day:
-                return p.read_text(encoding="utf-8")
+                content = self._read(str(self._dir / p.name))
+                if content is not None:
+                    return content
         return None

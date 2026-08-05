@@ -78,6 +78,8 @@ class AgentRole:
     skills: list[str] = field(default_factory=list)        # e.g. ["Python", "Go", "K8s"]
     system_prompt_extra: str = ""                          # appended to base system prompt
     is_default: bool = False                               # marked as a default/critical role
+    computer_kind: str = "podman"                          # 个人电脑类型: podman(默认) | ssh | local
+    computer_kwargs: dict[str, Any] = field(default_factory=dict)  # 电脑构造参数 (ssh 的 host 等)
 
     # ── Event filter state (per-role) ─────────────────────
     state: AgentState = AgentState.ON_DUTY_IDLE            # role-specific lifecycle
@@ -94,6 +96,7 @@ class AgentRole:
     _pool: Any = field(default=None, repr=False, init=False)   # RolePool back-reference for talk
     _note_store: Any = field(default=None, repr=False, init=False)  # NoteStore, lazy init
     _time_manager: Any = field(default=None, repr=False, init=False)  # TimeManager, lazy init
+    _computer: Any = field(default=None, repr=False, init=False)  # Computer, lazy init (角色添加时自动创建)
 
     # Callbacks
     on_task_start: Optional[Callable[[AgentRole, Task], None]] = field(default=None, repr=False, init=False)
@@ -252,17 +255,37 @@ class AgentRole:
     def is_busy(self) -> bool:
         return self._current_task is not None
 
+    # ── Personal computer (per-role) ───────────────────────
+
+    @property
+    def computer(self) -> Any:
+        """获取该角色的个人电脑 (惰性创建, 角色添加时自动创建并开机).
+
+        默认使用 Podman 虚拟电脑; 若角色信息 (computer_kind) 指定了
+        ssh/local 则按指定类型创建.
+        """
+        if self._computer is None:
+            from src.core.computer import create_computer
+            self._computer = create_computer(
+                kind=self.computer_kind,
+                role_id=self.role_id,
+                **self.computer_kwargs,
+            )
+            if not self._computer.is_on:
+                self._computer.power_on()
+        return self._computer
+
     # ── Note store (per-role file storage) ─────────────────
 
     @property
     def note_store(self) -> Any:
         """获取该角色的笔记存储实例 (惰性初始化, 按 role_id 隔离).
 
-        每个角色独立目录: data/notes/<role_id>/.
+        每个角色独立目录: data/notes/<role_id>/ (或电脑工作目录下的 notes/).
         """
         if self._note_store is None:
             from src.core.note_store import NoteStore
-            self._note_store = NoteStore(role_id=self.role_id)
+            self._note_store = NoteStore(role_id=self.role_id, computer=self.computer)
         return self._note_store
 
     def get_latest_summary(self, before_day: Optional[int] = None) -> Optional[str]:
@@ -347,6 +370,11 @@ class AgentRole:
         if toolkit.name == "hr":
             from src.python_tools.hr_toolkit import bind_role_to_toolkit
             bind_role_to_toolkit(toolkit, self)
+
+        # 个人电脑工具类自动绑定该角色 (run_command 等在角色自己的电脑上执行)
+        if toolkit.name == "computer":
+            from src.python_tools.computer_toolkit import bind_computer_to_toolkit
+            bind_computer_to_toolkit(toolkit, self)
 
         return self._tools.add_toolkit(toolkit)
 

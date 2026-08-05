@@ -28,6 +28,23 @@ logger = logging.getLogger(__name__)
 TICK_RANGE_DESC = f"单位: Tick, 范围 {TASK_TICK_MIN}~{TASK_TICK_MAX} (一天内, 0=上班 60=下班)"
 
 
+def _persist_task(role: Any, task: Any) -> None:
+    """将任务同步到角色的个人电脑 (tasks/<task_id>.md).
+
+    参数:
+        role: AgentRole (提供 computer).
+        task: TimeManager 返回的 Task 对象.
+    """
+    try:
+        comp = role.computer
+        content = (f"# 任务 {task.task_id}\n\n"
+                   f"- 内容: {task.description}\n"
+                   f"- 触发: 第 {task.day} 天 Tick {task.target_tick}\n")
+        comp.write_file(f"{comp.workdir}/tasks/{task.task_id}.md", content)
+    except Exception:
+        logger.warning("任务持久化到电脑失败 (不影响任务调度)", exc_info=True)
+
+
 def create_task_toolkit() -> ToolKit:
     """创建定时任务工具类.
 
@@ -72,6 +89,9 @@ def create_task_toolkit() -> ToolKit:
             )
         except ValueError as exc:
             return f"错误: {exc}"
+
+        # 同步持久化到个人电脑 (tasks/<task_id>.md), 供电脑上查看
+        _persist_task(role, task)
         return (f"定时任务已创建 [ID={task.task_id}]: '{task.description}' "
                 f"将在第 {task.day} 天 Tick {task.target_tick} 提醒你.")
 
@@ -82,7 +102,7 @@ def create_task_toolkit() -> ToolKit:
             args: 无 (只列出当前角色的任务).
 
         返回:
-            未触发的任务列表.
+            未触发的任务列表 (从个人电脑 tasks/ 目录读取).
         """
         role = _get_role()
         tasks = role.time_manager.list_tasks(owner_role=role.role_id)
@@ -117,6 +137,7 @@ def create_task_toolkit() -> ToolKit:
             return f"错误: {exc}"
         if task is None:
             return f"任务不存在: {task_id}"
+        _persist_task(_get_role(), task)  # 同步更新电脑上的任务文件
         return (f"任务已更新 [ID={task.task_id}]: 第 {task.day} 天 Tick {task.target_tick}, "
                 f"内容: {task.description}")
 
@@ -135,6 +156,12 @@ def create_task_toolkit() -> ToolKit:
 
         role = _get_role()
         if role.time_manager.cancel_task(task_id):
+            # 同步删除电脑上的任务文件
+            try:
+                comp = role.computer
+                comp.write_file(f"{comp.workdir}/tasks/{task_id}.md", "")  # 置空
+            except Exception:
+                logger.warning("任务文件清理失败 (不影响任务调度)", exc_info=True)
             return f"任务已删除: {task_id}"
         return f"任务不存在: {task_id}"
 
