@@ -2,7 +2,8 @@
 
 包含:
   - get_time: 查看当前 Tick 与作息状态
-  - take_rest: 休息工具. 休息指定 Tick 数, 期间状态为 ON_DUTY_IDLE
+  - take_rest: 休息工具. 无参数, 调用即进入休息状态 (ON_DUTY_IDLE),
+    由事件/任务自动唤醒
 
 时间规则: 1 Tick = 10 分钟. 系统启动 = Tick 0, 每天第 60 Tick 下班.
 
@@ -50,53 +51,29 @@ def create_time_toolkit() -> ToolKit:
         return manager.describe() + f"\n当前 Tick 数: {tick}"
 
     def _take_rest(args: dict[str, Any]) -> str:
-        """休息: 休息指定 Tick 数, 期间角色状态为 ON_DUTY_IDLE.
+        """休息: 调用即进入休息状态 (ON_DUTY_IDLE).
+
+        不设 tick 倒计时, 不会自动唤醒 — 保持休息直到有事件/任务到来,
+        由事件投递 (TASK_DUE / talk / SHIFT_START 等) 自动唤醒.
 
         参数:
-            args: {"ticks": 休息的 Tick 数 (1~60)}
+            args: 无需参数 (不再需要 ticks).
 
         返回:
-            休息结果说明.
+            休息状态说明.
         """
         manager = tk._time_holder["manager"]  # type: ignore[attr-defined]
         role = tk._time_holder["role"]  # type: ignore[attr-defined]
         if manager is None:
             raise RuntimeError("时间工具类尚未绑定 TimeManager, 请通过 role.add_toolkit() 注册")
 
-        raw = args.get("ticks")
-        if raw is None:
-            return "错误: 'ticks' 是必填参数, 必须是整数 (休息的 Tick 数)."
-        try:
-            ticks = int(raw)
-        except (TypeError, ValueError):
-            return "错误: 'ticks' 是必填参数, 必须是整数 (休息的 Tick 数)."
-        if not (1 <= ticks <= 60):
-            return "错误: 'ticks' 必须在 1~60 范围内."
-
-        # 记录调用前状态, 休息期间置为 ON_DUTY_IDLE
+        # 进入休息状态: ON_DUTY_IDLE (上班空闲, 不拦截事件, 等事件唤醒)
         from src.core.types import AgentState
-        prev_state = role.state if role is not None else None
         if role is not None and role.state != AgentState.ON_DUTY_IDLE:
             role.state = AgentState.ON_DUTY_IDLE
-            logger.info("[%s] 开始休息 %d Ticks (状态 ON_DUTY_IDLE)", role.role_id, ticks)
+            logger.info("[%s] 开始休息 (状态 ON_DUTY_IDLE, 等待事件唤醒)", role.role_id)
 
-        start_tick = manager.current_tick()
-        target_tick = start_tick + ticks
-
-        # 非阻塞: 只判断当前 Tick 是否已达到目标.
-        # 真实时钟 1 Tick = 10 分钟, 不在这里等待; 未到目标就保持休息状态,
-        # 到达后由下次调用/任务事件自然恢复.
-        if manager.current_tick() >= target_tick:
-            # 休息完成 → 恢复调用前状态
-            if role is not None:
-                role.state = prev_state
-            return f"休息结束: 从 Tick {start_tick} 休息到 Tick {target_tick} (共 {ticks} Ticks). 已恢复工作."
-
-        # 尚未到达目标 Tick → 状态改回, 提示稍后自动恢复
-        if role is not None:
-            role.state = prev_state
-        return (f"休息中: 当前 Tick {manager.current_tick()} 未达到目标 Tick {target_tick}, "
-                f"休息 {ticks} Ticks 尚未结束, 到达后会自动恢复.")
+        return "已开始休息 (状态 ON_DUTY_IDLE). 有任务或事件到来时会自动唤醒."
 
     tk.add_python_tool(
         name="get_time",
@@ -112,16 +89,13 @@ def create_time_toolkit() -> ToolKit:
     tk.add_python_tool(
         name="take_rest",
         description=(
-            "休息工具. 休息指定的 Tick 数 (1 Tick = 10 分钟), 休息期间你的状态为 ON_DUTY_IDLE. "
-            "适合在高强度工作之间安排休息, 或在等待他人工作时短暂放松. "
-            "休息结束后自动恢复工作."
+            "休息工具. 调用后立即进入休息状态 (ON_DUTY_IDLE), 不需要指定时长. "
+            "休息期间保持空闲, 不会自动唤醒; 当有任务或事件 (定时提醒/他人消息/上班) "
+            "到来时会自动唤醒你. 适合在没有任务时使用."
         ),
         input_schema={
             "type": "object",
-            "properties": {
-                "ticks": {"type": "integer", "description": "休息的 Tick 数 (1~60, 1 Tick = 10 分钟)"},
-            },
-            "required": ["ticks"],
+            "properties": {},
         },
         handler=_take_rest,
     )
