@@ -134,6 +134,12 @@ class Computer(ABC):
         """电脑是否开机."""
         return self._on
 
+    def reboot(self) -> str:
+        """重启电脑 (关机后再开机). 所有实现通用."""
+        off = self.power_off()
+        on = self.power_on()
+        return f"电脑[{self.role_id}] 已重启.\n- {off}\n- {on}"
+
     @property
     def workdir(self) -> str:
         """个人工作目录 (电脑上的路径). 子类可覆盖."""

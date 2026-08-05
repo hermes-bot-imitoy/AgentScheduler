@@ -632,6 +632,38 @@ class RolePool:
             raise KeyError(f"Role '{name}' not found. Available: {list(self._roles)}")
         return self._roles[name]
 
+    def remove_role(self, role_id: str) -> bool:
+        """离职: 移除角色并关闭其个人电脑.
+
+        1. 停止角色 worker (置 _running=False, 移除 future)
+        2. 关闭角色个人电脑 (若已创建且开机)
+        3. 从 _roles 移除
+
+        参数:
+            role_id: 要移除的角色 ID.
+
+        返回:
+            是否移除成功 (角色不存在返回 False).
+        """
+        if role_id not in self._roles:
+            return False
+        role = self._roles.pop(role_id)
+
+        # 停止 worker
+        role._running = False
+        self._futures.pop(role_id, None)
+
+        # 离职: 自动关闭个人电脑
+        try:
+            if role._computer is not None and role._computer.is_on:
+                role._computer.power_off()
+                logger.info("[%s] 已离职, 电脑已自动关闭", role_id)
+        except Exception:
+            logger.warning("[%s] 离职关电脑失败", role_id, exc_info=True)
+
+        logger.info("Role '%s' removed (离职)", role_id)
+        return True
+
     def all_roles(self) -> list[AgentRole]:
         """返回所有角色列表 (按注册顺序)."""
         return list(self._roles.values())

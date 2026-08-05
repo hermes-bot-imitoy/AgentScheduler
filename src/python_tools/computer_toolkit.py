@@ -3,11 +3,12 @@
 包含:
   - run_command:     在个人电脑上运行命令
   - computer_status: 查看电脑状态 (开机/关机/工作目录)
-  - power_off:       关机
+  - reboot:          重启个人电脑
 
 每个角色有独立电脑 (默认 Podman 虚拟电脑, 见 src/core/computer.py).
 MCP 工具通过 mcp_manager 的 mcp_add 安装到电脑上, 经 computer.run_mcp_tool 执行
 (本工具类不再提供 run_mcp_tool, 由 mcp_manager 统一管理).
+电脑开机时机: 角色加入/启动时自动开机; 一天结束 (下班总结) 或离职时自动关机.
 
 用法:
     from src.python_tools.computer_toolkit import create_computer_toolkit
@@ -53,9 +54,9 @@ def create_computer_toolkit() -> ToolKit:
         comp = _computer()
         return comp.describe()
 
-    def _power_off(args: dict[str, Any]) -> str:
-        """关闭个人电脑."""
-        return _computer().power_off()
+    def _reboot(args: dict[str, Any]) -> str:
+        """重启个人电脑."""
+        return _computer().reboot()
 
     tk.add_python_tool(
         "run_command",
@@ -73,10 +74,10 @@ def create_computer_toolkit() -> ToolKit:
         _computer_status,
     )
     tk.add_python_tool(
-        "power_off",
-        "关闭你的个人电脑. 关机后无法运行命令, 直到下次上班自动开机.",
+        "reboot",
+        "重启你的个人电脑 (关机后自动开机). 适合清理运行状态或安装工具后重启.",
         {"type": "object", "properties": {}},
-        _power_off,
+        _reboot,
     )
     return tk
 

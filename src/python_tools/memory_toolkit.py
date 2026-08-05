@@ -72,13 +72,20 @@ def create_memory_toolkit() -> ToolKit:
 
         path = store.save_summary(content, day=day)
 
-        # 总结完成 → 角色下班 (OFF_DUTY)
+        # 总结完成 → 角色下班 (OFF_DUTY) + 一天结束自动关电脑
         if role is not None:
             from src.core.types import AgentState
             if role.state != AgentState.OFF_DUTY:
                 role.state = AgentState.OFF_DUTY
                 logger.info("[%s] 总结完成, 角色已切换为 OFF_DUTY", role.role_id)
-            return f"第 {day} 天总结已保存: {path}. 你已下班 (OFF_DUTY)."
+            # 一天结束: 自动关闭个人电脑 (下次上班/事件自动开机)
+            try:
+                if role._computer is not None and role._computer.is_on:
+                    role._computer.power_off()
+                    logger.info("[%s] 一天结束, 电脑已自动关机", role.role_id)
+            except Exception:
+                logger.warning("[%s] 电脑自动关机失败", role.role_id, exc_info=True)
+            return f"第 {day} 天总结已保存: {path}. 你已下班 (OFF_DUTY), 电脑已关闭."
         return f"第 {day} 天总结已保存: {path}"
 
     def _write_note(args: dict[str, Any]) -> str:
