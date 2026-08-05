@@ -4,10 +4,10 @@
   - run_command:     在个人电脑上运行命令
   - computer_status: 查看电脑状态 (开机/关机/工作目录)
   - power_off:       关机
-  - run_mcp_tool:    在个人电脑上运行 MCP 工具
 
 每个角色有独立电脑 (默认 Podman 虚拟电脑, 见 src/core/computer.py).
-笔记/任务/总结等数据存放在电脑工作目录的指定子目录 (notes/ tasks/ 等).
+MCP 工具通过 mcp_manager 的 mcp_add 安装到电脑上, 经 computer.run_mcp_tool 执行
+(本工具类不再提供 run_mcp_tool, 由 mcp_manager 统一管理).
 
 用法:
     from src.python_tools.computer_toolkit import create_computer_toolkit
@@ -57,16 +57,6 @@ def create_computer_toolkit() -> ToolKit:
         """关闭个人电脑."""
         return _computer().power_off()
 
-    def _run_mcp_tool(args: dict[str, Any]) -> str:
-        """在个人电脑上运行一个 MCP 工具."""
-        name = args.get("tool_name", "").strip()
-        if not name:
-            return "错误: 'tool_name' 为必填参数."
-        tool_args = args.get("arguments", {}) or {}
-        if not isinstance(tool_args, dict):
-            return "错误: 'arguments' 必须是对象."
-        return _computer().run_mcp_tool(name, tool_args)
-
     tk.add_python_tool(
         "run_command",
         "在你自己个人的电脑上运行一条命令 (如 ls, cat, python, git 等), 返回命令输出. "
@@ -87,16 +77,6 @@ def create_computer_toolkit() -> ToolKit:
         "关闭你的个人电脑. 关机后无法运行命令, 直到下次上班自动开机.",
         {"type": "object", "properties": {}},
         _power_off,
-    )
-    tk.add_python_tool(
-        "run_mcp_tool",
-        "在你个人电脑上运行一个 MCP 工具 (如文件读写、GitHub 操作). "
-        "先用 mcp_list 查看有哪些 MCP 工具可用, 再调用.",
-        {"type": "object", "properties": {
-            "tool_name": {"type": "string", "description": "MCP 工具名"},
-            "arguments": {"type": "object", "description": "工具参数 (可选)"},
-        }, "required": ["tool_name"]},
-        _run_mcp_tool,
     )
     return tk
 

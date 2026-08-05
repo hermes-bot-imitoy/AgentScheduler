@@ -52,6 +52,7 @@ class Computer(ABC):
     def __init__(self, role_id: str):
         self.role_id = role_id
         self._on = False
+        self._mcp_tools: dict[str, Any] = {}  # 已安装到本电脑的 MCP 工具 (name → ToolDef)
 
     # ── 抽象接口 (子类实现) ──────────────────────────────
 
@@ -68,10 +69,6 @@ class Computer(ABC):
         """运行命令 (在个人电脑上执行). 返回命令输出."""
 
     @abstractmethod
-    def run_mcp_tool(self, tool_name: str, args: dict[str, Any]) -> str:
-        """运行 MCP 工具 (在个人电脑上执行). 返回工具结果."""
-
-    @abstractmethod
     def read_file(self, path: str) -> str:
         """读取个人电脑上的文件内容."""
 
@@ -82,6 +79,53 @@ class Computer(ABC):
     @abstractmethod
     def list_dir(self, path: str = "") -> str:
         """列出个人电脑指定目录内容 (默认工作目录)."""
+
+    # ── MCP 工具安装与执行 (所有实现共用) ────────────────
+
+    def install_mcp_tool(self, tool_def: Any) -> None:
+        """将 MCP 工具安装到本电脑 (按工具名记录).
+
+        参数:
+            tool_def: ToolDef 实例 (来自 MCPManager 工具池).
+        """
+        self._mcp_tools[tool_def.name] = tool_def
+
+    def uninstall_mcp_tool(self, tool_name: str) -> bool:
+        """从本电脑卸载一个 MCP 工具. 返回是否卸载成功."""
+        return self._mcp_tools.pop(tool_name, None) is not None
+
+    def has_mcp_tool(self, tool_name: str) -> bool:
+        """本电脑是否已安装指定 MCP 工具."""
+        return tool_name in self._mcp_tools
+
+    def list_installed_mcp_tools(self) -> list[str]:
+        """列出本电脑已安装的 MCP 工具名 (排序)."""
+        return sorted(self._mcp_tools)
+
+    def run_mcp_tool(self, tool_name: str, args: dict[str, Any]) -> str:
+        """运行 MCP 工具 (在本电脑上执行).
+
+        只执行已安装到本电脑的工具; 未安装则报错并提示可安装的工具来源.
+
+        参数:
+            tool_name: MCP 工具名.
+            args:      工具参数.
+
+        返回:
+            工具执行结果文本.
+        """
+        td = self._mcp_tools.get(tool_name)
+        if td is None:
+            return (f"错误: MCP 工具 '{tool_name}' 未安装到本电脑. "
+                    f"已安装: {self.list_installed_mcp_tools() or '(无)'}. "
+                    f"可用 mcp_search / mcp_list 查看可用工具, 用 mcp_add 安装.")
+        if td.handler is None:
+            return f"错误: 工具 '{tool_name}' 缺少可执行 handler."
+        try:
+            return str(td.handler(args))
+        except Exception as exc:
+            logger.exception("MCP 工具 %s 执行失败", tool_name)
+            return f"错误: 工具 '{tool_name}' 执行失败 - {exc}"
 
     # ── 通用 ──────────────────────────────────────────────
 
@@ -154,16 +198,6 @@ class LocalComputer(Computer):
             return "错误: 命令超时 (30s)."
         except Exception as exc:
             return f"错误: {exc}"
-
-    def run_mcp_tool(self, tool_name: str, args: dict[str, Any]) -> str:
-        # 通过全局 MCPManager 在"电脑上"执行 (工具池与角色共享)
-        from src.python_tools import _MCP_MANAGER
-        toolkits = _MCP_MANAGER.ensure_loaded()
-        for tk in toolkits.values():
-            td = tk.get_tool(tool_name)
-            if td is not None and td.handler is not None:
-                return td.handler(args)
-        return f"错误: MCP 工具 '{tool_name}' 不可用. 可用 mcp_list 查看."
 
     def read_file(self, path: str) -> str:
         p = self._resolve(path)
@@ -272,18 +306,6 @@ class PodmanComputer(Computer):
         except Exception as exc:
             return f"错误: 命令执行失败 - {exc}"
 
-    def run_mcp_tool(self, tool_name: str, args: dict[str, Any]) -> str:
-        if self._fallback is not None:
-            return self._fallback.run_mcp_tool(tool_name, args)
-        # podman 电脑也共享全局 MCP 工具池
-        from src.python_tools import _MCP_MANAGER
-        toolkits = _MCP_MANAGER.ensure_loaded()
-        for tk in toolkits.values():
-            td = tk.get_tool(tool_name)
-            if td is not None and td.handler is not None:
-                return td.handler(args)
-        return f"错误: MCP 工具 '{tool_name}' 不可用. 可用 mcp_list 查看."
-
     def read_file(self, path: str) -> str:
         if self._fallback is not None:
             return self._fallback.read_file(path)
@@ -382,15 +404,6 @@ class SSHComputer(Computer):
         if not self._on:
             return "错误: 电脑未开机."
         return self._ssh(command)
-
-    def run_mcp_tool(self, tool_name: str, args: dict[str, Any]) -> str:
-        from src.python_tools import _MCP_MANAGER
-        toolkits = _MCP_MANAGER.ensure_loaded()
-        for tk in toolkits.values():
-            td = tk.get_tool(tool_name)
-            if td is not None and td.handler is not None:
-                return td.handler(args)
-        return f"错误: MCP 工具 '{tool_name}' 不可用. 可用 mcp_list 查看."
 
     def read_file(self, path: str) -> str:
         return self._ssh(f"cat '{path}'")

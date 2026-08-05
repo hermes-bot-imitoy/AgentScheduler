@@ -42,6 +42,6 @@ DEFAULT_TOOLKITS: dict[str, Callable[[], object]] = {
     "memory": create_memory_toolkit,
     "time": create_time_toolkit,
     "task": create_task_toolkit,
-    "computer": create_computer_toolkit,          # 个人电脑 (默认 Podman, 角色添加时自动创建)
+    "computer": create_computer_toolkit,          # run_command / computer_status / power_off
     "mcp_manager": lambda: create_mcp_manager_toolkit(_MCP_MANAGER),
 }

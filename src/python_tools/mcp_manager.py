@@ -144,7 +144,12 @@ class MCPManager:
     # ── 角色工具管理 ──────────────────────────────────────
 
     def add_tool(self, role: Any, tool_name: str) -> str:
-        """为角色添加一个本地已有的 MCP 工具.
+        """为角色安装一个本地已有的 MCP 工具 (安装到该角色的个人电脑).
+
+        安装语义:
+          1. 工具安装到角色电脑 (computer.install_mcp_tool), 归属该电脑
+          2. 同时在角色 ToolRegistry 注册一个代理 handler — 调用时转发到
+             computer.run_mcp_tool 在电脑上执行
 
         参数:
             role:      AgentRole 实例.
@@ -162,24 +167,28 @@ class MCPManager:
         if tool_name in mine:
             return f"工具 '{tool_name}' 已添加给 {role_id}, 无需重复添加."
 
-        # 注册进角色 ToolRegistry (复用 MCP 工具的 handler, 直接可调用)
-        from src.core.tools import ToolRegistry
+        # 1) 安装到角色的个人电脑
+        computer = role.computer
+        computer.install_mcp_tool(td)
         assert td.handler is not None, f"工具 {tool_name} 缺少 handler"
+
+        # 2) 角色注册代理 handler → 转发到电脑上执行
+        from src.core.tools import ToolRegistry
         if role._tools is None:
             role._tools = ToolRegistry()
         role._tools.add_tool(
             name=td.name,
             description=td.description,
             input_schema=td.input_schema,
-            handler=td.handler,
+            handler=lambda args, _n=tool_name: computer.run_mcp_tool(_n, args),
             source=td.source,
         )
         mine.add(tool_name)
-        logger.info("[%s] MCP 工具已添加: %s (来源 %s)", role_id, tool_name, td.source)
-        return f"成功: 工具 '{tool_name}' 已添加给 {role_id} ({td.description[:60]})"
+        logger.info("[%s] MCP 工具已安装到电脑: %s (来源 %s)", role_id, tool_name, td.source)
+        return f"成功: 工具 '{tool_name}' 已安装到 {role_id} 的电脑 ({td.description[:60]})"
 
     def remove_tool(self, role: Any, tool_name: str) -> str:
-        """从角色移除一个 MCP 工具.
+        """从角色电脑卸载一个 MCP 工具.
 
         参数:
             role:      AgentRole 实例.
@@ -192,21 +201,26 @@ class MCPManager:
         mine = self._role_tools.get(role_id, set())
         if tool_name not in mine:
             return f"工具 '{tool_name}' 尚未添加给 {role_id}, 无需移除."
+
+        # 1) 从角色电脑卸载
+        computer = role.computer
+        computer.uninstall_mcp_tool(tool_name)
+
+        # 2) 从角色 ToolRegistry 移除
         from src.core.tools import ToolRegistry
         if role._tools is None:
             role._tools = ToolRegistry()
         role._tools.remove_tool(tool_name)
         mine.discard(tool_name)
-        logger.info("[%s] MCP 工具已移除: %s", role_id, tool_name)
-        return f"成功: 工具 '{tool_name}' 已从 {role_id} 移除."
+        logger.info("[%s] MCP 工具已从电脑卸载: %s", role_id, tool_name)
+        return f"成功: 工具 '{tool_name}' 已从 {role_id} 的电脑卸载."
 
     def list_role_tools(self, role: Any) -> list[dict[str, str]]:
-        """列出角色已添加的 MCP 工具."""
-        role_id = role.role_id
-        mine = self._role_tools.get(role_id, set())
+        """列出角色电脑上已安装的 MCP 工具."""
+        computer = role.computer
         return [
             {"name": n, "description": (self._tool_pool[n].description or "")[:120]}
-            for n in sorted(mine) if n in self._tool_pool
+            for n in computer.list_installed_mcp_tools() if n in self._tool_pool
         ]
 
     # ── 角色工具包 (MCP 工具集合, 按组) ──────────────────
