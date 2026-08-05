@@ -31,6 +31,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.core.agent_system import AgentSystem
 from src.core.types import AgentState, Event, Priority
 from src.python_tools.client_toolkit import create_client_toolkit
+from src.python_tools.hr_toolkit import create_hr_toolkit
 
 # 调试期: DEBUG 日志永久启用 (临时). 打印 LLM 追加内容/工具调用全链路.
 # 第三方库 (requests/urllib3/httpcore) 的 DEBUG 刷屏太多, 压回 WARNING.
@@ -225,8 +226,10 @@ def main() -> None:
     step(f"创建 AgentSystem, 加入 {len(ROLE_IDS)} 个默认角色 ({'/'.join(ROLE_IDS)})...")
     system = AgentSystem(role_ids=ROLE_IDS)
     system.get_role("CEO").add_toolkit(create_client_toolkit())
+    system.get_role("HR").add_toolkit(create_hr_toolkit())
     ok(f"角色就绪: {system.pool.list_roles()}")
     ok("CEO 已装备 talk_to_client (与甲方实时交流)")
+    ok("HR 已装备招聘工具 (post_job_posting / list_candidates)")
 
     # ── 2. 启动系统 (真实时钟, Tick 0 = 第 1 天上班) ───────
     system.start()
