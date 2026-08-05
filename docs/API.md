@@ -397,6 +397,7 @@ tk.tool_names / tk.tool_count / tk.get_tool(name) / __iter__ / __contains__
 | `memory_toolkit` | `summary(content, day)` / `write_note(title, content)` / `edit_note` / `list_notes` / `read_note` | 每日总结（保存后切 OFF_DUTY）+ 笔记 |
 | `time_toolkit` | `get_time()` / `take_rest()` | 查看作息时间 / 休息（无参数, 进入 ON_DUTY_IDLE, 事件自动唤醒） |
 | `task_toolkit` | `create_task(description, tick, day)` / `list_tasks()` / `edit_task(task_id, ...)` / `delete_task(task_id)` | 定时任务（Tick 提醒，定向投递） |
+| `mcp_manager` | `mcp_search(keyword)` / `mcp_list()` / `mcp_add(tool_name)` / `mcp_remove(tool_name)` / `mcp_my_tools()` | MCP 工具自助管理（搜索/添加/移除本地 MCP 工具，角色自动装配） |
 | `client_toolkit` | `talk_to_client(message)` | 与甲方实时交流（阻塞等待用户输入） |
 
 ```python
