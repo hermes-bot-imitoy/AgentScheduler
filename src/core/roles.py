@@ -377,25 +377,31 @@ class AgentRole:
     # ── Tool-calling LLM execution ─────────────────────────
 
     def _execute_with_tools(self, task: Task) -> tuple[str, int]:
-        """Execute a task with tool-calling loop.
+        """Execute a task with tool-calling loop (原生 function calling).
 
-        1. Send system prompt + tools + task to LLM
-        2. If LLM responds with a tool_call, execute tool and feed result back
-        3. Loop until LLM gives final response (no tool_call)
+        1. Send system prompt + OpenAI tools declaration + task to LLM
+        2. If LLM responds with message.tool_calls (结构化), execute each and
+           feed results back as role:"tool" messages
+        3. Loop until LLM gives final response (no tool_calls)
         4. Return (final_text, total_tokens)
         """
         assert self._llm is not None
 
         system = self.build_system_prompt()
-        tools_prompt = ""
+        openai_tools: list[dict] = []
         if self._tools is not None:
-            tools_prompt = self._tools.get_tools_prompt()
+            openai_tools = self._tools.to_openai_tools()
 
+        # 原生 function calling: 工具由 API 声明, 不再注入文本协议提示词.
+        # 提示词中保留使用规则 (防无限探索) — 来自 get_tools_prompt 的 Rules 部分.
         full_system = system
-        if tools_prompt:
-            full_system += "\n\n" + tools_prompt
+        if self._tools is not None and self._tools.tool_count > 0:
+            rules = self._tools.get_tools_prompt()
+            # 只取 Rules 段 (文本协议示例对原生模式无意义, 反而误导)
+            rules_part = rules.split("Rules:")[-1]
+            full_system += "\n\nRules:" + rules_part
 
-        messages: list[dict[str, str]] = [
+        messages: list[dict] = [
             {"role": "system", "content": full_system},
             {"role": "user", "content": task.description},
         ]
@@ -403,30 +409,46 @@ class AgentRole:
         total_tokens = 0
         round_no = 0  # 工具调用轮次计数 (仅用于 DEBUG 日志, 不限制循环)
 
-        # 工具调用循环: 无限轮次, 直到 LLM 返回纯文本终答 (无 tool_call 块).
-        # 无上限截断 — LLM 每轮必须调工具才会继续, 迟早给出终答; 若每轮都调工具
-        # 则持续循环 (DEBUG 日志可观察), 由 LLM 自行收敛.
+        # 工具调用循环: 无限轮次, 直到 LLM 返回无 tool_calls 的终答.
+        # 无上限截断 — LLM 每轮必须调工具才会继续, 迟早给出终答.
         while True:
             round_no += 1
-            # Build conversation for this round
-            msgs_for_api = [{"role": m["role"], "content": m["content"]} for m in messages]
 
-            response_text, usage = self._llm._call_api(msgs_for_api, 0.7, 512)
+            content, raw_calls, usage = self._llm.chat_with_tools(
+                messages, openai_tools, 0.7, 1024,
+            )
             round_tokens = usage.get("total_tokens", 0) if usage else 0
             total_tokens += round_tokens
 
-            # Check for tool_call (支持一个回复内多个 tool_call 块)
-            tool_calls = self._parse_tool_calls(response_text)
+            # 原生结构化判定: tool_calls 非空 = 本轮在调工具
+            tool_calls = raw_calls or []
 
             if not tool_calls:
                 # Final response — no tool call
                 logger.debug("[%s] 工具循环: 第 %d 轮收到终答 (无工具调用), 任务完成",
                              self.role_id, round_no)
-                return response_text, total_tokens
+                return content, total_tokens
+
+            # 把本轮 LLM 回复 (含原生 tool_calls) 追加进对话历史
+            assistant_msg: dict = {"role": "assistant", "content": content or None}
+            if tool_calls:
+                assistant_msg["tool_calls"] = tool_calls
+            messages.append(assistant_msg)
+            logger.debug("[%s] 工具循环: 追加 LLM 输出消息 (%d 字符, %d 个原生工具调用)",
+                         self.role_id, len(content), len(tool_calls))
 
             # 顺序执行本轮的每个工具调用
-            results_feed: list[str] = []
-            for tool_name, tool_args in tool_calls:
+            for call in tool_calls:
+                fn = call.get("function", {})
+                tool_name = fn.get("name", "")
+                call_id = call.get("id", "")
+                try:
+                    tool_args = json.loads(fn.get("arguments") or "{}")
+                except json.JSONDecodeError:
+                    tool_args = {}
+                    logger.warning("[%s] 工具 %s 的 arguments 不是合法 JSON: %s",
+                                   self.role_id, tool_name, fn.get("arguments"))
+
                 if self._tools is None:
                     tool_result = f"Error: no tools available (tool '{tool_name}' not found)"
                 else:
@@ -434,23 +456,19 @@ class AgentRole:
                     tool_result = result.content[0].text if result.content else str(result)
 
                 logger.info("[%s] Tool call: %s(%s) → %s",
-                            self.role_id, tool_name, json.dumps(tool_args, ensure_ascii=False),
+                            self.role_id, tool_name,
+                            json.dumps(tool_args, ensure_ascii=False),
                             tool_result[:80])
 
-                results_feed.append(f"Tool result ({tool_name}):\n{tool_result}")
+                # 原生协议: 工具结果以 role:"tool" 消息回喂, 关联 tool_call_id
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": call_id,
+                    "content": tool_result,
+                })
 
-            # 提醒: 工具调用轮次较多时打 DEBUG 警告 (不截断, 仅供观察)
             logger.debug("[%s] 工具循环: 第 %d 轮仍包含工具调用, 继续下一轮 (无轮次上限)",
                          self.role_id, round_no)
-
-            # Feed all tool results back to LLM
-            messages.append({"role": "assistant", "content": response_text})
-            logger.debug("[%s] 工具循环: 追加 LLM 输出消息 (%d 字符): %s",
-                         self.role_id, len(response_text), response_text)
-            feed_content = "\n\n".join(results_feed)
-            messages.append({"role": "user", "content": feed_content})
-            logger.debug("[%s] 工具循环: 追加工具结果回喂 (%d 字符): %s",
-                         self.role_id, len(feed_content), feed_content)
 
     @staticmethod
     def _parse_tool_calls(response: str) -> list[tuple[str, dict[str, Any]]]:

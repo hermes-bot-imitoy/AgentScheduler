@@ -435,6 +435,24 @@ class ToolRegistry:
 
         return "\n".join(lines)
 
+    def to_openai_tools(self) -> list[dict]:
+        """生成 OpenAI 原生 function calling 格式的工具声明列表.
+
+        返回:
+            [{"type": "function", "function": {"name", "description", "parameters"}}]
+        """
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": t["name"],
+                    "description": t["description"],
+                    "parameters": t["input_schema"] or {"type": "object", "properties": {}},
+                },
+            }
+            for t in self.list_tools()
+        ]
+
     # ── Properties ────────────────────────────────────────
 
     @property

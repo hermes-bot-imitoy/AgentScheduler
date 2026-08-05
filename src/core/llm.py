@@ -205,3 +205,92 @@ class DeepSeekLLM:
             )
 
         return content, usage
+
+    # ── 原生 function calling ─────────────────────────────
+
+    def chat_with_tools(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        temperature: float = DEFAULT_TEMPERATURE,
+        max_tokens: int = 1024,
+    ) -> tuple[str, list[dict], Optional[dict]]:
+        """原生 function calling 请求 (OpenAI 兼容).
+
+        请求携带 tools 声明, 响应里 message.tool_calls 结构化给出工具调用
+        (name + arguments JSON), 而非文本协议 ```tool_call 块.
+
+        参数:
+            messages: 对话消息 (含 role/tool_call_id 等字段, 原样透传).
+            tools:    OpenAI 格式工具声明列表.
+
+        返回:
+            (content, raw_tool_calls, usage).
+            raw_tool_calls: 响应中 message["tool_calls"] 原样列表 (每个含
+            id/type/function{name,arguments}); 无工具调用时为 [].
+        """
+        url = f"{self.base_url}/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        payload: dict = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "tools": tools,
+            "tool_choice": "auto",
+        }
+
+        # 与 chat() 相同的 thinking 模式处理
+        if self.thinking:
+            payload["thinking"] = {"type": "enabled"}
+            if max_tokens < 1024:
+                payload["max_tokens"] = 1024
+
+        self._debug(
+            "DeepSeek API call (tools): model=%s messages=%d tools=%d thinking=%s",
+            self.model, len(messages), len(tools), self.thinking,
+        )
+
+        try:
+            resp = requests.post(url, json=payload, headers=headers, timeout=120)
+            resp.raise_for_status()
+            data = resp.json()
+        except requests.exceptions.Timeout:
+            logger.error("DeepSeek API timeout")
+            return "[API timeout]", [], None
+        except requests.exceptions.RequestException as e:
+            logger.error("DeepSeek API error: %s", e)
+            return f"[API error: {e}]", [], None
+
+        choice = data.get("choices", [{}])[0]
+        message = choice.get("message", {})
+
+        content = message.get("content") or ""
+        reasoning = message.get("reasoning_content", "")
+        raw_calls = message.get("tool_calls") or []
+
+        if reasoning:
+            self._debug("DeepSeek reasoning (%d chars): %s",
+                        len(reasoning), reasoning)
+
+        # 原生工具调用: content 可能为空 (推理全在 reasoning_content),
+        # 有 tool_calls 时以 tool_calls 为准, 不回退到 reasoning 当正文
+        if not content and reasoning and not raw_calls:
+            logger.warning("DeepSeek: empty content, falling back to reasoning_content")
+            content = reasoning
+
+        usage = data.get("usage")
+
+        if usage and self.thinking:
+            self._debug(
+                "DeepSeek tokens: prompt=%s completion=%s reasoning=%s total=%s",
+                usage.get("prompt_tokens", "?"),
+                usage.get("completion_tokens", "?"),
+                usage.get("completion_tokens_details", {}).get("reasoning_tokens", "?"),
+                usage.get("total_tokens", "?"),
+            )
+
+        return content, raw_calls, usage
