@@ -49,10 +49,12 @@ class Computer(ABC):
     read_file / write_file / list_dir.
     """
 
-    def __init__(self, role_id: str):
+    def __init__(self, role_id: str, auto_mcp: bool = False):
         self.role_id = role_id
         self._on = False
+        self._auto_mcp = auto_mcp          # 自动创建的电脑: 创建时自动安装 MCP 服务器
         self._mcp_tools: dict[str, Any] = {}  # 已安装到本电脑的 MCP 工具 (name → ToolDef)
+        self._mcp_server: Any = None       # 本电脑独立的 MCP 服务器连接 (懒创建)
 
     # ── 抽象接口 (子类实现) ──────────────────────────────
 
@@ -81,6 +83,73 @@ class Computer(ABC):
         """列出个人电脑指定目录内容 (默认工作目录)."""
 
     # ── MCP 工具安装与执行 (所有实现共用) ────────────────
+
+    @property
+    def host_dir(self) -> str:
+        """宿主机上该电脑工作目录的映射路径 (MCP 服务器授权目录).
+
+        - LocalComputer: 就是 workdir (data/computers/<role>)
+        - PodmanComputer: 容器挂载的宿主机目录 (容器内 /home/agent ↔ 宿主机 data/computers/<role>)
+        - SSHComputer: 远程电脑无宿主机映射 → None (不自动装 MCP 服务器)
+
+        MCP filesystem 服务器跑在宿主机, 授权这个目录 = 操作该角色电脑上的文件.
+        """
+        return str(getattr(self, "_host_dir", None) or "")
+
+    def install_mcp_server(self) -> list[str]:
+        """在本电脑上安装独立的 MCP 服务器 (filesystem, 授权本电脑目录).
+
+        每个电脑一个独立服务器进程 (npx 启动), 授权目录 = 本电脑 host_dir,
+        工具注册进 self._mcp_tools, handler 绑定本电脑自己的服务器连接 —
+        执行即发生在该角色电脑的目录上. 幂等: 已安装则直接返回.
+
+        返回:
+            已安装的工具名列表.
+        """
+        if self._mcp_server is not None:
+            return self.list_installed_mcp_tools()
+        if not self._auto_mcp:
+            logger.info("电脑[%s] 非自动创建, 不自动安装 MCP 服务器", self.role_id)
+            return []
+        if not self.host_dir:
+            logger.warning("电脑[%s] 无宿主机目录映射, 跳过 MCP 服务器安装 (SSH 远程电脑)",
+                           self.role_id)
+            return []
+
+        try:
+            from src.python_tools.mcp_toolkit import MCPServer
+            self._mcp_server = MCPServer(
+                package="@modelcontextprotocol/server-filesystem",
+                args=[self.host_dir],
+            )
+            self._mcp_server.connect()
+            tools = self._mcp_server.list_tools()
+            from src.core.tools import ToolDef
+            for tool in tools:
+                tname = getattr(tool, "name", "")
+                if not tname:
+                    continue
+                server = self._mcp_server
+
+                def _make_handler(srv=server, tn=tname):
+                    def handler(args: dict[str, Any]) -> str:
+                        return srv.call_tool(tn, args)
+                    return handler
+
+                self._mcp_tools[tname] = ToolDef(
+                    name=tname,
+                    description=getattr(tool, "description", "") or "",
+                    input_schema=getattr(tool, "input_schema", {}) or {},
+                    handler=_make_handler(),
+                    source=f"mcp:{server.package} (本电脑)",
+                )
+            logger.info("电脑[%s] 独立 MCP 服务器已安装, %d 个工具: %s",
+                        self.role_id, len(self._mcp_tools),
+                        self.list_installed_mcp_tools())
+        except Exception as exc:
+            logger.exception("电脑[%s] MCP 服务器安装失败", self.role_id)
+            return []
+        return self.list_installed_mcp_tools()
 
     def install_mcp_tool(self, tool_def: Any) -> None:
         """将 MCP 工具安装到本电脑 (按工具名记录).
@@ -159,11 +228,17 @@ class LocalComputer(Computer):
     工作目录: data/computers/<role_id>/, 命令用 subprocess 在本地执行.
     """
 
-    def __init__(self, role_id: str, base_dir: str = "./data/computers"):
-        super().__init__(role_id)
+    def __init__(self, role_id: str, base_dir: str = "./data/computers",
+                 auto_mcp: bool = False):
+        super().__init__(role_id, auto_mcp=auto_mcp)
         self._dir = Path(base_dir).resolve() / (role_id or "shared")
         self._dir.mkdir(parents=True, exist_ok=True)
         self._on = True  # 本地模拟默认开机
+
+    @property
+    def host_dir(self) -> str:
+        # 本地电脑: 工作目录即宿主机目录 (MCP 服务器直接授权它)
+        return str(self._dir)
 
     @property
     def workdir(self) -> str:
@@ -238,8 +313,9 @@ class PodmanComputer(Computer):
         image:   容器镜像 (默认 alpine:latest).
     """
 
-    def __init__(self, role_id: str, image: str = DEFAULT_IMAGE):
-        super().__init__(role_id)
+    def __init__(self, role_id: str, image: str = DEFAULT_IMAGE,
+                 auto_mcp: bool = False):
+        super().__init__(role_id, auto_mcp=auto_mcp)
         self.image = image
         self.container_name = f"maf-{role_id or 'shared'}"
         if shutil.which("podman") is None:
@@ -247,9 +323,17 @@ class PodmanComputer(Computer):
                 "Podman 未安装, 角色 %s 的电脑降级为本地目录模拟 (LocalComputer)",
                 role_id,
             )
-            self._fallback = LocalComputer(role_id)
+            self._fallback = LocalComputer(role_id, auto_mcp=auto_mcp)
         else:
             self._fallback = None
+
+    @property
+    def host_dir(self) -> str:
+        # 降级: 透传本地电脑的宿主机目录
+        if self._fallback is not None:
+            return self._fallback.host_dir
+        # 容器挂载的宿主机目录: data/computers/<role> ↔ 容器内 /home/agent
+        return str((Path("./data/computers").resolve() / (self.role_id or "shared")))
 
     @property
     def workdir(self) -> str:
@@ -265,14 +349,18 @@ class PodmanComputer(Computer):
 
     def _ensure_container(self) -> None:
         """确保容器存在并运行 (不存在则创建), 并创建工作目录."""
+        # 容器挂载宿主机目录: data/computers/<role> ↔ 容器内 /home/agent
+        host_dir = self.host_dir
+        Path(host_dir).mkdir(parents=True, exist_ok=True)
         r = self._pod("ps", "-a", "--filter", f"name={self.container_name}", "--format", "{{.Names}}")
         if self.container_name not in (r.stdout or ""):
-            self._pod("run", "-d", "--name", self.container_name, self.image,
-                      "sleep", "infinity")
+            self._pod("run", "-d", "--name", self.container_name,
+                      "-v", f"{host_dir}:{self.workdir}",
+                      self.image, "sleep", "infinity")
         r = self._pod("ps", "--filter", f"name={self.container_name}", "--format", "{{.Names}}")
         if self.container_name not in (r.stdout or ""):
             self._pod("start", self.container_name)
-        # 确保工作目录存在 (alpine 默认无 /home/agent)
+        # 确保工作目录存在 (alpine 默认无 /home/agent, 挂载后即存在)
         self._pod("exec", self.container_name, "sh", "-c",
                   f"mkdir -p '{self.workdir}'")
 
@@ -366,8 +454,9 @@ class SSHComputer(Computer):
         user: Optional[str] = None,
         key_path: Optional[str] = None,
         port: int = 22,
+        auto_mcp: bool = False,
     ):
-        super().__init__(role_id)
+        super().__init__(role_id, auto_mcp=auto_mcp)
         if not host:
             raise ValueError("SSHComputer 需要 host 参数 (远程主机地址)")
         self.host = host
@@ -431,22 +520,26 @@ class SSHComputer(Computer):
 
 # ── 工厂 ──────────────────────────────────────────────────
 
-def create_computer(kind: str = "podman", role_id: str = "", **kwargs: Any) -> Computer:
+def create_computer(kind: str = "podman", role_id: str = "", *,
+                    auto_mcp: bool = False, **kwargs: Any) -> Computer:
     """按类型创建电脑实例.
 
     参数:
-        kind:   "podman" (默认) | "ssh" | "local".
-        role_id: 角色标识.
-        kwargs:  透传给具体实现 (ssh 需 host/user 等).
+        kind:     "podman" (默认) | "ssh" | "local".
+        role_id:  角色标识.
+        auto_mcp: 是否自动创建的电脑实例. True = 创建实例时自动安装独立的
+                  MCP 服务器 (AgentRole.computer 自动创建时传 True);
+                  False = 不自动安装 (手动 create_computer 调用).
+        kwargs:   透传给具体实现 (ssh 需 host/user 等).
 
     返回:
         Computer 实例.
     """
     kind = (kind or "podman").lower()
     if kind == "local":
-        return LocalComputer(role_id=role_id)
+        return LocalComputer(role_id=role_id, auto_mcp=auto_mcp)
     if kind == "ssh":
         if not kwargs.get("host"):
             raise ValueError("SSHComputer 需要 host 参数 (远程主机地址)")
-        return SSHComputer(role_id=role_id, **kwargs)
-    return PodmanComputer(role_id=role_id, **kwargs)
+        return SSHComputer(role_id=role_id, auto_mcp=auto_mcp, **kwargs)
+    return PodmanComputer(role_id=role_id, auto_mcp=auto_mcp, **kwargs)

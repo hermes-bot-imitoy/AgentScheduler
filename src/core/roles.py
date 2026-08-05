@@ -269,6 +269,7 @@ class AgentRole:
             self._computer = create_computer(
                 kind=self.computer_kind,
                 role_id=self.role_id,
+                auto_mcp=True,  # 自动创建的电脑: 创建时自动安装独立 MCP 服务器
                 **self.computer_kwargs,
             )
             if not self._computer.is_on:

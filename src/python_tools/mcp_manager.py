@@ -144,7 +144,7 @@ class MCPManager:
     # ── 角色工具管理 ──────────────────────────────────────
 
     def install_group_defaults(self, role: Any, group: str) -> list[str]:
-        """把指定组的全部 MCP 工具作为默认工具安装到角色.
+        """把指定组的 MCP 工具作为默认工具安装到角色 (从角色电脑的独立服务器).
 
         供默认加载使用: 角色加入/启动时自动装配某个 MCP 工具组
         (如 file_ops 文件操作), 无需 mcp_search/mcp_add.
@@ -156,57 +156,70 @@ class MCPManager:
         返回:
             成功安装的工具名列表 (跳过已存在/失败的).
         """
-        try:
-            groups = self.ensure_loaded()
-        except Exception:
-            logger.exception("MCP 默认工具组加载失败: %s", group)
+        # 1) 确保角色电脑的独立 MCP 服务器已安装 (自动创建的电脑)
+        computer = role.computer
+        computer.install_mcp_server()
+        installed = computer.list_installed_mcp_tools()
+        if not installed:
+            logger.warning("[%s] 电脑无 MCP 服务器工具, 跳过默认组 '%s'",
+                           role.role_id, group)
             return []
-        tk = groups.get(group)
-        if tk is None:
-            logger.warning("MCP 默认工具组不存在: %s (可用: %s)", group, sorted(groups))
-            return []
-        installed = []
-        for td in tk:
+
+        # 2) 按分组规则过滤电脑服务器上的工具
+        from src.python_tools.mcp_toolkit import _match_group, load_rules
+        patterns: list[str] = []
+        for g in load_rules().get("groups", []):
+            if g["name"] == group:
+                patterns = g.get("match", [])
+                break
+        targets = [n for n in installed
+                   if not patterns or _match_group(n, patterns)]
+
+        # 3) 逐个安装到角色 (经 add_tool, 从电脑服务器取)
+        ok = []
+        for name in targets:
             try:
-                r = self.add_tool(role, td.name)
+                r = self.add_tool(role, name)
                 if not r.startswith("错误"):
-                    installed.append(td.name)
+                    ok.append(name)
             except Exception:
-                logger.exception("[%s] MCP 默认工具安装失败: %s", role.role_id, td.name)
+                logger.exception("[%s] MCP 默认工具安装失败: %s", role.role_id, name)
         logger.info("[%s] MCP 默认工具组 '%s' 已安装 %d 个工具: %s",
-                    role.role_id, group, len(installed), installed)
-        return installed
+                    role.role_id, group, len(ok), ok)
+        return ok
 
     def add_tool(self, role: Any, tool_name: str) -> str:
-        """为角色安装一个本地已有的 MCP 工具 (安装到该角色的个人电脑).
+        """为角色安装一个 MCP 工具 (来自该角色电脑的独立 MCP 服务器).
 
         安装语义:
-          1. 工具安装到角色电脑 (computer.install_mcp_tool), 归属该电脑
-          2. 同时在角色 ToolRegistry 注册一个代理 handler — 调用时转发到
-             computer.run_mcp_tool 在电脑上执行
+          1. 确保角色电脑的独立 MCP 服务器已安装 (自动创建时自动装)
+          2. 工具从电脑服务器工具池取 (computer._mcp_tools), 归属该电脑
+          3. 在角色 ToolRegistry 注册一个代理 handler — 调用时转发到
+             computer.run_mcp_tool, 在角色电脑的服务器上执行
 
         参数:
             role:      AgentRole 实例.
-            tool_name: 工具池中的工具名 (如 "read_file").
+            tool_name: 工具名 (须在该角色电脑的服务器上存在, 如 "read_file").
 
         返回:
             操作结果说明 (成功/已存在/不存在).
         """
-        self.ensure_loaded()
-        td = self._tool_pool.get(tool_name)
-        if td is None:
-            return f"错误: 本地没有名为 '{tool_name}' 的 MCP 工具. 可用: {sorted(self._tool_pool)[:20]}"
+        # 1) 电脑的独立 MCP 服务器 (自动创建时已装, 幂等)
+        computer = role.computer
+        computer.install_mcp_server()
         role_id = role.role_id
         mine = self._role_tools.setdefault(role_id, set())
         if tool_name in mine:
             return f"工具 '{tool_name}' 已添加给 {role_id}, 无需重复添加."
 
-        # 1) 安装到角色的个人电脑
-        computer = role.computer
-        computer.install_mcp_tool(td)
-        assert td.handler is not None, f"工具 {tool_name} 缺少 handler"
+        # 2) 从电脑服务器取工具
+        td = computer._mcp_tools.get(tool_name)
+        if td is None:
+            return (f"错误: 电脑[{role_id}] 的 MCP 服务器上没有名为 '{tool_name}' 的工具. "
+                    f"本电脑已安装: {computer.list_installed_mcp_tools() or '(无)'}. "
+                    f"可用 mcp_search / mcp_list 查看全局可用工具.")
 
-        # 2) 角色注册代理 handler → 转发到电脑上执行
+        # 3) 角色注册代理 handler → 转发到电脑服务器上执行
         from src.core.tools import ToolRegistry
         if role._tools is None:
             role._tools = ToolRegistry()
