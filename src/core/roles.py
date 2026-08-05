@@ -338,6 +338,11 @@ class AgentRole:
             from src.python_tools.task_toolkit import bind_role_to_toolkit
             bind_role_to_toolkit(toolkit, self)
 
+        # MCP 管理工具类自动绑定该角色 (add/remove 需要知道当前角色是谁)
+        if toolkit.name == "mcp_manager":
+            from src.python_tools.mcp_manager import bind_mcp_manager_to_toolkit
+            bind_mcp_manager_to_toolkit(toolkit, self)
+
         return self._tools.add_toolkit(toolkit)
 
     @property
