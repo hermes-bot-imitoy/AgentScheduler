@@ -1,6 +1,5 @@
-"""MAF Workflow Engine — 底层有状态图执行器.
+"""Workflow Engine — 底层有状态图执行器.
 
-Inspired by Microsoft Agent Framework's workflow/task system.
 Provides:
   - Stateful sessions with checkpointing
   - Isolated contexts per sub-task (no leaky tool logs)

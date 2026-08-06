@@ -1,4 +1,4 @@
-"""Core data types for the MAF Shift & Event-Driven Agent Scheduler."""
+"""Core data types for the Shift & Event-Driven Agent Scheduler."""
 
 from __future__ import annotations
 
@@ -82,9 +82,11 @@ class Journal:
 # ── Session ──────────────────────────────────────────────────
 
 @dataclass
-# # MAF会话上下文: 绑定单个Agent, 包含system_prompt, history, checkpoints
 class SessionContext:
-    """An isolated MAF session context bound to one agent."""
+    """An isolated session context bound to one agent.
+
+    会话上下文: 绑定单个Agent, 包含 system_prompt, history, checkpoints
+    """
     session_id: str = field(default_factory=lambda: uuid.uuid4().hex[:16])
     agent_id: str = ""
     state: AgentState = AgentState.OFF_DUTY
