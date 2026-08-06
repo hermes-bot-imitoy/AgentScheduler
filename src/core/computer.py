@@ -35,8 +35,11 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-# 默认 podman 镜像 (alpine 轻量, 带 sh/busybox)
-DEFAULT_IMAGE = "alpine:latest"
+# 默认 podman 镜像 (node:22-alpine: 轻量且带 node/npx, MCP 服务器在容器内跑)
+DEFAULT_IMAGE = "node:22-alpine"
+
+# MCP filesystem 服务器包 (容器内全局安装, 避免每次 npx 拉包)
+MCP_FILESYSTEM_PACKAGE = "@modelcontextprotocol/server-filesystem"
 
 
 class Computer(ABC):
@@ -359,6 +362,64 @@ class PodmanComputer(Computer):
             logger.warning("电脑[%s] 获取内网 IP 失败", self.role_id, exc_info=True)
             return ""
 
+    def install_mcp_server(self) -> list[str]:
+        """在本电脑 (容器) 内安装独立的 MCP 服务器.
+
+        C 方案: MCP 服务器跑在容器内 (podman exec -i 保持 stdio 管道),
+        授权目录 = 容器内 workdir (/home/agent) — 与 LLM 看到的路径字面一致,
+        不再有宿主机/容器路径空间不一致的问题.
+
+        降级 (无 podman) 时走 LocalComputer (宿主机 npx, 授权 data/computers/<role>).
+        """
+        if self._fallback is not None:
+            return self._fallback.install_mcp_server()
+        if self._mcp_server is not None:
+            return self.list_installed_mcp_tools()
+        if not self._auto_mcp:
+            logger.info("电脑[%s] 非自动创建, 不自动安装 MCP 服务器", self.role_id)
+            return []
+
+        try:
+            from src.python_tools.mcp_toolkit import MCPServer
+            # 容器内启动 filesystem 服务器: podman exec -i <容器> npx -y <包> /home/agent
+            # -i 保持 stdin/stdout 管道, MCP stdio 协议走容器内进程
+            self._ensure_container()  # 确保容器运行 + 包已预装
+            self._mcp_server = MCPServer(
+                package=MCP_FILESYSTEM_PACKAGE,
+                args=[self.workdir],  # 授权容器内工作目录
+                command="podman",
+                command_args=["exec", "-i", self.container_name, "npx", "-y",
+                              MCP_FILESYSTEM_PACKAGE, self.workdir],
+            )
+            self._mcp_server.connect()
+            tools = self._mcp_server.list_tools()
+            from src.core.tools import ToolDef
+            for tool in tools:
+                tname = getattr(tool, "name", "")
+                if not tname:
+                    continue
+                server = self._mcp_server
+
+                def _make_handler(srv=server, tn=tname):
+                    def handler(args: dict[str, Any]) -> str:
+                        return srv.call_tool(tn, args)
+                    return handler
+
+                self._mcp_tools[tname] = ToolDef(
+                    name=tname,
+                    description=getattr(tool, "description", "") or "",
+                    input_schema=getattr(tool, "input_schema", {}) or {},
+                    handler=_make_handler(),
+                    source=f"mcp:{MCP_FILESYSTEM_PACKAGE} (容器内 {self.container_name})",
+                )
+            logger.info("电脑[%s] 容器内 MCP 服务器已安装, %d 个工具: %s",
+                        self.role_id, len(self._mcp_tools),
+                        self.list_installed_mcp_tools())
+        except Exception as exc:
+            logger.exception("电脑[%s] 容器内 MCP 服务器安装失败", self.role_id)
+            return []
+        return self.list_installed_mcp_tools()
+
     def _pod(self, *args: str, timeout: int = 60) -> subprocess.CompletedProcess:
         """执行 podman 命令."""
         return subprocess.run(
@@ -385,6 +446,23 @@ class PodmanComputer(Computer):
         # 确保工作目录存在 (alpine 默认无 /home/agent, 挂载后即存在)
         self._pod("exec", self.container_name, "sh", "-c",
                   f"mkdir -p '{self.workdir}'")
+        # 预装 MCP filesystem 服务器包 (容器内全局安装, 之后启动即用, 免 npx 拉包)
+        if not self._mcp_pkg_installed:
+            r = self._pod("exec", self.container_name, "sh", "-c",
+                          "npm ls -g --depth=0 2>/dev/null | grep -q 'server-filesystem' "
+                          "|| npm install -g --no-fund --no-audit "
+                          f"'{MCP_FILESYSTEM_PACKAGE}'", timeout=300)
+            self._mcp_pkg_installed = True
+            logger.info("电脑[%s] 容器内已预装 MCP filesystem 服务器 (npm -g)",
+                        self.role_id)
+
+    @property
+    def _mcp_pkg_installed(self) -> bool:
+        return getattr(self, "_mcp_pkg_flag", False)
+
+    @_mcp_pkg_installed.setter
+    def _mcp_pkg_installed(self, value: bool) -> None:
+        self._mcp_pkg_flag = value
 
     def power_on(self) -> str:
         if self._fallback is not None:

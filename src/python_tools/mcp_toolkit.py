@@ -62,9 +62,16 @@ class MCPServer:
         args:    附加命令行参数 (可选, 如 filesystem 的授权目录)
     """
 
-    def __init__(self, package: str, args: list[str] | None = None):
+    def __init__(self, package: str, args: list[str] | None = None,
+                 command: str | None = None,
+                 command_args: list[str] | None = None):
         self.package = package
         self.args = args or []
+
+        # 自定义启动命令 (如容器内: podman exec -i <容器> npx ...).
+        # 指定后不再走宿主 npx, 直接 spawn command + command_args.
+        self.command = command
+        self.command_args = command_args or []
 
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
@@ -92,11 +99,18 @@ class MCPServer:
             asyncio.set_event_loop(self._loop)
 
             async def _connect():
-                # 自动构造 npx 启动命令: npx -y <包名> [args...]
-                server_params = StdioServerParameters(
-                    command="npx",
-                    args=["-y", self.package, *self.args],
-                )
+                if self.command:
+                    # 自定义启动命令 (容器内执行等): 直接 spawn, 不经过宿主 npx
+                    server_params = StdioServerParameters(
+                        command=self.command,
+                        args=self.command_args,
+                    )
+                else:
+                    # 默认: npx -y <包名> [args...]
+                    server_params = StdioServerParameters(
+                        command="npx",
+                        args=["-y", self.package, *self.args],
+                    )
                 async with stdio_client(server_params) as (read, write):
                     from mcp import ClientSession
                     async with ClientSession(read, write) as session:
