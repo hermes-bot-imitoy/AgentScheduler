@@ -265,11 +265,12 @@ class AgentRole:
         ssh/local 则按指定类型创建.
         """
         if self._computer is None:
-            from src.core.computer import create_computer
-            self._computer = create_computer(
+            from src.core.computer import _COMPUTER_MANAGER
+            self._computer = _COMPUTER_MANAGER.create(
                 kind=self.computer_kind,
                 role_id=self.role_id,
-                auto_mcp=True,  # 自动创建的电脑: 创建时自动安装独立 MCP 服务器
+                name=self.name,  # 人名, 供内网设备列表展示
+                auto_mcp=True,   # 自动创建的电脑: 创建时自动安装独立 MCP 服务器
                 **self.computer_kwargs,
             )
             if not self._computer.is_on:
@@ -659,13 +660,12 @@ class RolePool:
         role._running = False
         self._futures.pop(role_id, None)
 
-        # 离职: 自动关闭个人电脑
+        # 离职: 销毁个人电脑 (关机 + 删除容器 + 从管理器注销)
         try:
-            if role._computer is not None and role._computer.is_on:
-                role._computer.power_off()
-                logger.info("[%s] 已离职, 电脑已自动关闭", role_id)
+            from src.core.computer import _COMPUTER_MANAGER
+            _COMPUTER_MANAGER.destroy(role_id)
         except Exception:
-            logger.warning("[%s] 离职关电脑失败", role_id, exc_info=True)
+            logger.warning("[%s] 离职销毁电脑失败", role_id, exc_info=True)
 
         logger.info("Role '%s' removed (离职)", role_id)
         return True

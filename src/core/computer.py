@@ -341,6 +341,24 @@ class PodmanComputer(Computer):
             return self._fallback.workdir
         return "/home/agent"
 
+    def get_lan_ip(self) -> str:
+        """获取本电脑在自定义桥接网络 (maf-net) 中的 IP 地址.
+
+        返回:
+            IP 字符串; 降级本地模拟返回 localhost; 查不到返回空串.
+        """
+        if self._fallback is not None:
+            return "127.0.0.1 (本地模拟)"
+        try:
+            # 网络名含连字符, Go template 必须用 index 取 (直接 .maf-net 会被当减号)
+            fmt = '{{(index .NetworkSettings.Networks "%s").IPAddress}}' % DEFAULT_NETWORK_NAME
+            r = self._pod("inspect", self.container_name, "-f", fmt)
+            ip = (r.stdout or "").strip()
+            return ip or ""
+        except Exception:
+            logger.warning("电脑[%s] 获取内网 IP 失败", self.role_id, exc_info=True)
+            return ""
+
     def _pod(self, *args: str, timeout: int = 60) -> subprocess.CompletedProcess:
         """执行 podman 命令."""
         return subprocess.run(
@@ -354,7 +372,11 @@ class PodmanComputer(Computer):
         Path(host_dir).mkdir(parents=True, exist_ok=True)
         r = self._pod("ps", "-a", "--filter", f"name={self.container_name}", "--format", "{{.Names}}")
         if self.container_name not in (r.stdout or ""):
+            # 加入自定义桥接网络 (电脑间互通), 网络不存在则先创建
+            from src.core.computer import _COMPUTER_MANAGER
+            network = _COMPUTER_MANAGER.ensure_network()
             self._pod("run", "-d", "--name", self.container_name,
+                      "--network", network,
                       "-v", f"{host_dir}:{self.workdir}",
                       self.image, "sleep", "infinity")
         r = self._pod("ps", "--filter", f"name={self.container_name}", "--format", "{{.Names}}")
@@ -543,3 +565,140 @@ def create_computer(kind: str = "podman", role_id: str = "", *,
             raise ValueError("SSHComputer 需要 host 参数 (远程主机地址)")
         return SSHComputer(role_id=role_id, auto_mcp=auto_mcp, **kwargs)
     return PodmanComputer(role_id=role_id, auto_mcp=auto_mcp, **kwargs)
+
+
+# ── ComputerManager (电脑管理类) ──────────────────────────
+
+DEFAULT_NETWORK_NAME = "maf-net"  # podman 自定义桥接网络 (电脑间互通)
+
+
+class ComputerManager:
+    """电脑管理类: 分配 / 注册 / 查询 / 销毁 各角色电脑.
+
+    职责:
+      - 维护角色 → 电脑的注册表 (含人名, 供内网设备列表展示)
+      - 确保 podman 自定义桥接网络存在 (电脑间可互相通信)
+      - 统一销毁入口 (关机 + 删除容器 + 注销)
+      - 查询内网电脑设备 (人名 / 电脑名 / IP)
+
+    全局单例 _COMPUTER_MANAGER (computer.py 末尾), AgentRole.computer
+    自动创建的电脑都会注册进来; 手动 create_computer() 创建的不会.
+    """
+
+    def __init__(self, network_name: str = DEFAULT_NETWORK_NAME):
+        self.network_name = network_name
+        self._computers: dict[str, Any] = {}   # role_id → Computer
+        self._names: dict[str, str] = {}       # role_id → 人名
+
+    # ── 网络 ──────────────────────────────────────────────
+
+    def ensure_network(self) -> str:
+        """确保 podman 自定义桥接网络存在 (幂等). 返回网络名.
+
+        网络用于让各角色电脑 (容器) 之间可以互相通信.
+        本机无 podman 时直接返回网络名 (不实际创建, 降级环境无网络).
+        """
+        if shutil.which("podman") is None:
+            return self.network_name
+        r = subprocess.run(["podman", "network", "exists", self.network_name],
+                           capture_output=True, text=True, timeout=30)
+        if r.returncode != 0:
+            subprocess.run(["podman", "network", "create", self.network_name],
+                           capture_output=True, text=True, timeout=60)
+            logger.info("podman 自定义桥接网络已创建: %s", self.network_name)
+        return self.network_name
+
+    # ── 分配 / 注册 ───────────────────────────────────────
+
+    def create(self, kind: str = "podman", role_id: str = "", name: str = "",
+               auto_mcp: bool = False, **kwargs: Any) -> Any:
+        """创建并注册一台角色电脑 (分配).
+
+        参数:
+            kind:     电脑类型 ("podman" 默认 | "ssh" | "local").
+            role_id:  角色 ID (注册表键).
+            name:     人名 (供内网设备列表展示, 可空).
+            auto_mcp: 是否自动安装独立 MCP 服务器.
+            kwargs:   透传给 create_computer.
+
+        返回:
+            Computer 实例.
+        """
+        self.ensure_network()
+        comp = create_computer(kind=kind, role_id=role_id,
+                               auto_mcp=auto_mcp, **kwargs)
+        self.register(comp, name=name)
+        return comp
+
+    def register(self, computer: Any, name: str = "") -> None:
+        """注册一台已创建的电脑到管理器."""
+        self._computers[computer.role_id] = computer
+        if name:
+            self._names[computer.role_id] = name
+
+    # ── 查询 ──────────────────────────────────────────────
+
+    def get(self, role_id: str) -> Any:
+        """按角色 ID 获取电脑 (不存在抛 KeyError)."""
+        return self._computers[role_id]
+
+    def list_all(self) -> list[Any]:
+        """返回全部已注册电脑列表 (按注册顺序)."""
+        return list(self._computers.values())
+
+    # ── 销毁 ──────────────────────────────────────────────
+
+    def destroy(self, role_id: str) -> bool:
+        """销毁角色电脑: 关机 + 删除容器 + 注销. 返回是否销毁成功.
+
+        参数:
+            role_id: 角色 ID.
+        """
+        comp = self._computers.pop(role_id, None)
+        self._names.pop(role_id, None)
+        if comp is None:
+            return False
+        # 关机
+        try:
+            if comp.is_on:
+                comp.power_off()
+        except Exception:
+            logger.warning("电脑[%s] 关机失败 (销毁继续)", role_id, exc_info=True)
+        # 删除 podman 容器 (仅真实容器, 降级 LocalComputer 无容器)
+        if isinstance(comp, PodmanComputer) and comp._fallback is None:
+            try:
+                comp._pod("rm", "-f", comp.container_name)
+                logger.info("电脑[%s] 容器已删除: %s", role_id, comp.container_name)
+            except Exception:
+                logger.warning("电脑[%s] 容器删除失败", role_id, exc_info=True)
+        logger.info("电脑[%s] 已销毁 (注销)", role_id)
+        return True
+
+    # ── 内网设备 ──────────────────────────────────────────
+
+    def list_lan_devices(self) -> list[dict[str, str]]:
+        """列出内网电脑设备: 人名 / 电脑名 / IP.
+
+        返回:
+            [{"person", "role_id", "computer", "ip"}, ...] 按角色排序.
+        """
+        devices = []
+        for role_id, comp in sorted(self._computers.items()):
+            ip = ""
+            if hasattr(comp, "container_name"):
+                # podman 容器: 查网络内 IP
+                ip = comp.get_lan_ip() if hasattr(comp, "get_lan_ip") else ""
+            elif hasattr(comp, "host"):
+                ip = comp.host  # ssh 电脑: 远程主机地址
+            devices.append({
+                "person": self._names.get(role_id, role_id),
+                "role_id": role_id,
+                "computer": getattr(comp, "container_name",
+                                    f"local-{role_id.lower()}"),
+                "ip": ip or "(无内网IP)",
+            })
+        return devices
+
+
+# 全局单例: 角色自动创建的电脑统一注册到这里
+_COMPUTER_MANAGER = ComputerManager()

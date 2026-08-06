@@ -3,9 +3,11 @@
 包含:
   - run_command:     在个人电脑上运行命令
   - computer_status: 查看电脑状态 (开机/关机/工作目录)
+  - lan_devices:     查看内网电脑设备 (人名 / 电脑名 / IP)
   - reboot:          重启个人电脑
 
-每个角色有独立电脑 (默认 Podman 虚拟电脑, 见 src/core/computer.py).
+每个角色有独立电脑 (默认 Podman 虚拟电脑, 见 src/core/computer.py),
+各电脑在同一 podman 自定义桥接网络 (maf-net) 中, 可互相通信.
 MCP 工具通过 mcp_manager 的 mcp_add 安装到电脑上, 经 computer.run_mcp_tool 执行
 (本工具类不再提供 run_mcp_tool, 由 mcp_manager 统一管理).
 电脑开机时机: 角色加入/启动时自动开机; 一天结束 (下班总结) 或离职时自动关机.
@@ -58,6 +60,18 @@ def create_computer_toolkit() -> ToolKit:
         """重启个人电脑."""
         return _computer().reboot()
 
+    def _lan_devices(args: dict[str, Any]) -> str:
+        """查看内网电脑设备 (人名 / 电脑名 / IP)."""
+        from src.core.computer import _COMPUTER_MANAGER
+        devices = _COMPUTER_MANAGER.list_lan_devices()
+        if not devices:
+            return "(内网暂无电脑设备)"
+        lines = []
+        for d in devices:
+            lines.append("- {} ({}) | 电脑 {} | {}".format(
+                d["person"], d["role_id"], d["computer"], d["ip"]))
+        return "内网电脑设备 (网络 maf-net):\n" + "\n".join(lines)
+
     tk.add_python_tool(
         "run_command",
         "在你自己个人的电脑上运行一条命令 (如 ls, cat, python, git 等), 返回命令输出. "
@@ -72,6 +86,13 @@ def create_computer_toolkit() -> ToolKit:
         "查看你个人电脑的状态: 是否开机, 工作目录在哪里, 电脑类型.",
         {"type": "object", "properties": {}},
         _computer_status,
+    )
+    tk.add_python_tool(
+        "lan_devices",
+        "查看内网电脑设备列表: 每个人名, 电脑名称, 内网 IP. "
+        "各角色电脑在同一桥接网络 (maf-net) 中, 可据此找到其他电脑并通信.",
+        {"type": "object", "properties": {}},
+        _lan_devices,
     )
     tk.add_python_tool(
         "reboot",
