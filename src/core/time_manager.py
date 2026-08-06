@@ -267,6 +267,7 @@ class TimeEventBus(EventBus):
           1. 调度表中的定时事件 (register_event(tick=N))
           2. 定时任务 (schedule_task)
           3. 下班 SHIFT_END (当天 shift_end_tick 的绝对位置)
+          4. 下一天上班 SHIFT_START (已过当天下班后, 快进到次日上班)
 
         返回:
             大于当前 Tick 的最小候选绝对 Tick; 没有则返回 None.
@@ -284,6 +285,10 @@ class TimeEventBus(EventBus):
         # 3) 当天下班
         candidates.append(
             (day - 1) * self.ticks_per_day + self.shift_end_tick)
+        # 4) 已过当天下班 → 下一个事件是次日上班 SHIFT_START
+        tod = self.tick_of_day()
+        if tod >= self.shift_end_tick:
+            candidates.append(day * self.ticks_per_day + self.shift_start_tick)
 
         future = [c for c in candidates if c > now]
         if not future:
