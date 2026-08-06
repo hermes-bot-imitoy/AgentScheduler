@@ -459,9 +459,76 @@ class TimeEventBus(EventBus):
             payload=payload or {},
         )
         self._tasks[task.task_id] = task
+
+        # 只保存任务列表; 当天任务直接注册事件, 隔天任务等目标天上班时自动加载
+        self._register_task_event_if_today(task)
         logger.info("TimeManager: 定时任务已注册 [%s] %s → tick %d (day %d), 所有者 %s",
                     task.task_id, description, target_tick, task.day, owner_role)
         return task
+
+    # ── 任务 ↔ 事件调度表桥接 ─────────────────────────────
+
+    def _register_task_event_if_today(self, task: ScheduledTask) -> bool:
+        """当天任务直接注册 TASK_DUE 事件到调度表 (隔天任务不注册).
+
+        隔天任务只保存在 _tasks 列表, 由 _load_today_tasks_to_bus()
+        在目标天 SHIFT_START (上班) 时自动加载到事件调度表.
+
+        参数:
+            task: ScheduledTask.
+
+        返回:
+            True = 已注册 (当天/已过期), False = 隔天, 仅保存.
+        """
+        if task.day > self.day_number():
+            logger.info("TimeManager: 任务 [%s] 是隔天任务 (day %d), 仅保存, "
+                        "目标天上班时自动加载到事件总线", task.task_id, task.day)
+            return False
+        self.register_event(
+            self._task_to_event(task),
+            tick=task.absolute_fire_tick(self.ticks_per_day),
+        )
+        return True
+
+    def _task_to_event(self, task: ScheduledTask) -> Event:
+        """构造任务的 TASK_DUE 提醒事件."""
+        return Event(
+            source="task",
+            event_type=EVENT_TASK_DUE,
+            priority=Priority.NORMAL,
+            target_role=task.owner_role,
+            payload={
+                "task_id": task.task_id,
+                "description": task.description,
+                "tick": task.target_tick,
+                "day": task.day,
+                "owner_role": task.owner_role,
+            },
+        )
+
+    def _load_today_tasks_to_bus(self) -> None:
+        """目标天上班 (SHIFT_START) 时: 把今天到期的任务加载到事件调度表.
+
+        隔天任务在创建时仅保存在 _tasks 列表, 不注册事件;
+        到达目标天后由本方法统一注册, 与当天任务走同一条事件调度表.
+        """
+        today = self.day_number()
+        loaded = 0
+        for task in list(self._tasks.values()):
+            if task.fired:
+                continue
+            if task.day <= today and self._register_task_event_if_today(task):
+                loaded += 1
+        if loaded:
+            logger.info("TimeManager: 上班加载 %d 个当天任务到事件总线", loaded)
+
+    def _cancel_task_event(self, task_id: str) -> bool:
+        """从事件调度表取消某任务对应的事件 (任务被删除/编辑时)."""
+        for eid, (_, ev) in list(self._tick_schedule.items()):
+            if ev.payload.get("task_id") == task_id:
+                del self._tick_schedule[eid]
+                return True
+        return False
 
     def list_tasks(self, owner_role: Optional[str] = None) -> list[ScheduledTask]:
         """列出未触发的定时任务.
@@ -501,6 +568,8 @@ class TimeEventBus(EventBus):
         task = self._tasks.get(task_id)
         if task is None:
             return None
+        # 编辑前取消旧的事件注册 (若已注册)
+        self._cancel_task_event(task_id)
         if description is not None:
             task.description = description
         if target_tick is not None:
@@ -511,11 +580,13 @@ class TimeEventBus(EventBus):
             task.target_tick = target_tick
         if day is not None:
             task.day = day
+        # 编辑后重新注册 (当天任务) — 隔天任务仅保存, 上班时自动加载
+        self._register_task_event_if_today(task)
         logger.info("TimeManager: 定时任务已编辑 [%s] → tick %d (day %d)", task_id, task.target_tick, task.day)
         return task
 
     def cancel_task(self, task_id: str) -> bool:
-        """删除定时任务.
+        """删除定时任务 (同时取消已注册的事件).
 
         参数:
             task_id: 任务 ID.
@@ -525,49 +596,21 @@ class TimeEventBus(EventBus):
         """
         if task_id in self._tasks:
             del self._tasks[task_id]
+            self._cancel_task_event(task_id)
             logger.info("TimeManager: 定时任务已删除 [%s]", task_id)
             return True
         return False
 
-    def _check_due_tasks(self) -> None:
-        """检查到期任务并发送提醒事件 (由时间线程周期性调用)."""
-        now_tick = self.current_tick()
-        for task_id, task in list(self._tasks.items()):
-            if task.fired:
-                continue
-            if now_tick >= task.absolute_fire_tick(self.ticks_per_day):
-                task.fired = True
-                del self._tasks[task_id]  # 一次性提醒, 触发后移除
-                self._fire_task_event(task)
-
-    def _fire_task_event(self, task: ScheduledTask) -> None:
-        """发送定时任务提醒事件 (定向投递给任务所有者)."""
-        event = Event(
-            source="task",
-            event_type=EVENT_TASK_DUE,
-            priority=Priority.NORMAL,
-            target_role=task.owner_role,
-            payload={
-                "task_id": task.task_id,
-                "description": task.description,
-                "tick": task.target_tick,
-                "day": task.day,
-                "owner_role": task.owner_role,
-            },
-        )
-        logger.info("TimeEventBus 任务提醒: [%s] %s → %s (tick %d, day %d)",
-                    task.task_id, task.description, task.owner_role,
-                    task.target_tick, task.day)
-
-        self._dispatch(event)
-
     def _tick_loop(self) -> None:
-        """时间线程主循环: 周期性检查 Tick, 触发作息事件与到期任务/定时事件."""
+        """时间线程主循环: 周期性检查 Tick, 触发作息事件与到期定时事件.
+
+        任务提醒已统一走事件调度表 (schedule_task 当天注册 / 隔天上班加载),
+        不再有独立的任务到期检查.
+        """
         logger.debug("TimeEventBus 线程循环开始")
         while self._running:
             try:
                 self._check_and_fire()
-                self._check_due_tasks()
                 # 调度表中的定时事件 (register_event(tick=N)) 到期投递
                 for ev in self._check_due_events(self.current_tick()):
                     logger.info("TimeEventBus 定时事件到期投递: id=%s type=%s",
@@ -597,6 +640,8 @@ class TimeEventBus(EventBus):
         if (not self._fired_start
                 and self.shift_start_tick <= tod < self.shift_end_tick):
             self._fired_start = True
+            # 上班: 把今天到期的隔天任务加载到事件调度表
+            self._load_today_tasks_to_bus()
             self._fire_event(EVENT_SHIFT_START)
 
         # 下班事件 (每天达到 shift_end_tick 后触发一次)
