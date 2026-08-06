@@ -53,6 +53,10 @@ class Event:
     # 定向投递: 只发给指定 role_id (None = 广播给所有角色)
     target_role: Optional[str] = None
 
+    # 触发 Tick: None = 立即触发 (注册即进管线); 整数 = 在指定绝对 Tick 触发
+    # (由 TimeEventBus 的时间线程到期投递). 用于"时间与事件深度绑定".
+    trigger_tick: Optional[int] = None
+
     # Filter metadata (set during processing)
     salience_score: float = 0.0
     filter_decision: FilterDecision = FilterDecision.PASS

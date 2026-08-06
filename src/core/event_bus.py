@@ -92,6 +92,9 @@ class EventBus:
         self._state_getter: Callable[[], AgentState] = lambda: AgentState.ON_DUTY_IDLE
         self._relevance_fn: PersonaRelevanceFn = _default_relevance
 
+        # 定时事件调度表: {event_id: (trigger_tick, Event)} — 时间线程到期投递
+        self._tick_schedule: dict[str, tuple[int, Event]] = {}
+
         # Metrics
         self.stats: dict[str, int] = {
             "total_events": 0,
@@ -108,6 +111,62 @@ class EventBus:
 
     def set_relevance_fn(self, fn: PersonaRelevanceFn) -> None:
         self._relevance_fn = fn
+
+    # ── Event registration (时间与事件深度绑定) ──────────
+
+    def register_event(self, event: Event, tick: Optional[int] = None) -> str:
+        """向事件总线注册一个事件.
+
+        tick 语义 (时间与事件深度绑定):
+          - tick=None (默认): 立即触发 — 直接进入 3 层过滤管线
+          - tick=整数:        在指定绝对 Tick 触发 — 存入调度表,
+                              由时间线程 (TimeEventBus) 到期自动投递.
+
+        参数:
+            event: 要注册的 Event.
+            tick:  触发 Tick (绝对 Tick, 自系统启动累计). None = 立即.
+
+        返回:
+            事件 ID.
+        """
+        if tick is None:
+            # 立即触发: 进入 3 层过滤管线
+            self.process_event(event)
+        else:
+            event.trigger_tick = tick
+            self._tick_schedule[event.id] = (tick, event)
+            logger.info("EventBus 注册定时事件: id=%s type=%s → tick %d (立即触发=%s)",
+                        event.id, event.event_type, tick, False)
+        return event.id
+
+    def cancel_event(self, event_id: str) -> bool:
+        """取消一个已注册的定时事件 (仅调度表中的)."""
+        return self._tick_schedule.pop(event_id, None) is not None
+
+    def list_scheduled_events(self) -> list[dict[str, Any]]:
+        """列出待触发的定时事件 (按触发 Tick 排序)."""
+        return [
+            {"event_id": eid, "tick": tk, "type": ev.event_type,
+             "target_role": ev.target_role}
+            for eid, (tk, ev) in sorted(self._tick_schedule.items(),
+                                        key=lambda kv: kv[1][0])
+        ]
+
+    def _check_due_events(self, current_tick: int) -> list[Event]:
+        """检查并取回到期事件 (由时间线程周期性调用).
+
+        参数:
+            current_tick: 当前绝对 Tick.
+
+        返回:
+            到期的事件列表 (已从调度表移除, 调用方负责投递).
+        """
+        due = []
+        for eid, (tk, ev) in list(self._tick_schedule.items()):
+            if current_tick >= tk:
+                del self._tick_schedule[eid]
+                due.append(ev)
+        return due
 
     # ── Pipeline ──────────────────────────────────────────
 

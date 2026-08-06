@@ -1,4 +1,8 @@
-"""时间管理器 (TimeManager) — 以 Tick 为单位的作息时间.
+"""时间与事件总线 (TimeEventBus) — 以 Tick 为单位的作息时间 + 3 层过滤事件总线.
+
+TimeManager 已并入 EventBus: TimeEventBus(EventBus) 既是时间源 (时钟/Tick/天),
+又是事件总线 (3 层过滤管线 + 定时事件调度表). 时间与事件深度绑定:
+向总线注册事件时可指定触发 Tick (不传默认立即触发).
 
 规则:
   - 系统开始运行即为 Tick 0, 不依赖墙钟时间
@@ -9,15 +13,20 @@
 事件触发 (独占后台线程):
   - 每天第 0 Tick   → 发送 SHIFT_START 事件 (优先级 EMERGENCY)
   - 每天第 60 Tick  → 发送 SHIFT_END   事件 (优先级 EMERGENCY)
-  - SHIFT_END 的 instruction 提示角色调用 summary 工具总结并下班
+  - 定时任务/定时事件到期 → 自动投递
 
 用法:
-    tm = TimeManager()
-    tm.set_event_sender(bus.process_event)   # 设置事件发送回调
-    tm.start()                                # 启动时间线程 (记录启动时刻 = Tick 0)
-    tick = tm.current_tick()                  # 当前 Tick (自启动累计)
-    day = tm.day_number()                     # 当前第几天 (从 1 开始)
-    tm.stop()                                 # 停止线程
+    bus = TimeEventBus()
+    bus.set_event_sender(dispatcher.trigger)   # 事件最终投递到各角色
+    bus.start()                                # 启动时间线程 (记录启动时刻 = Tick 0)
+    tick = bus.current_tick()                  # 当前 Tick (自启动累计)
+    day = bus.day_number()                     # 当前第几天 (从 1 开始)
+
+    # 注册事件: 立即触发 (不传 tick)
+    bus.register_event(Event(source="email", event_type="urgent"))
+    # 注册事件: 指定 Tick 触发 (到点由时间线程自动投递)
+    bus.register_event(Event(...), tick=30)
+    bus.stop()                                 # 停止线程
 """
 
 from __future__ import annotations
@@ -30,6 +39,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Optional
 
+from src.core.event_bus import EventBus
 from src.core.types import Event, Priority
 
 logger = logging.getLogger(__name__)
@@ -78,8 +88,17 @@ class ScheduledTask:
 
 
 @dataclass
-class TimeManager:
-    """以 Tick 为单位的作息时间管理器.
+class TimeEventBus(EventBus):
+    """时间与事件深度绑定的事件总线 (TimeManager 并入 EventBus).
+
+    继承 EventBus 的 3 层过滤管线, 并承担原 TimeManager 的全部职责:
+      - 以 Tick 为单位的作息时间 (时钟/tick/天/上下班)
+      - 时间线程 (周期性检查, 触发作息事件与到期定时事件)
+      - 定时任务管理 (schedule_task 等, 底层复用 register_event 调度表)
+
+    注册事件统一走 register_event(event, tick=None):
+      - tick=None: 立即触发 (进入 3 层过滤管线)
+      - tick=整数: 在指定绝对 Tick 触发 (时间线程到期自动投递)
 
     系统启动时刻记为 Tick 0 / 第 1 天, 之后按 elapsed 时间推进 Tick,
     不依赖任何硬编码的墙钟时间.
@@ -109,13 +128,59 @@ class TimeManager:
     _fired_end: bool = field(default=False, repr=False, init=False)
     _tasks: dict[str, ScheduledTask] = field(default_factory=dict, repr=False, init=False)  # 定时任务表
 
+    def __post_init__(self) -> None:
+        """dataclass 初始化后: 调用父类 EventBus 的 __init__ 建立过滤管线.
+
+        TimeEventBus 是 dataclass, 其生成的 __init__ 会覆盖 EventBus 手动写的
+        __init__, 因此这里显式调用 super().__init__() 恢复 EventBus 的
+        buffer / state_getter / relevance_fn / stats / _tick_schedule 等字段.
+        """
+        EventBus.__init__(self)
+
+    # ── 事件注册 (时间与事件深度绑定) ─────────────────────
+
+    def register_event(self, event: Event, tick: Optional[int] = None) -> str:
+        """向事件总线注册一个事件 (TimeEventBus 版).
+
+        tick 语义:
+          - tick=None (默认): 立即触发 — 走事件发送回调 (EventDispatcher),
+            进入各角色 3 层过滤管线.
+          - tick=整数:        在指定绝对 Tick 触发 — 存入调度表,
+                              由时间线程到期自动投递 (同样走发送回调).
+
+        参数:
+            event: 要注册的 Event.
+            tick:  触发 Tick (绝对 Tick, 自系统启动累计). None = 立即.
+
+        返回:
+            事件 ID.
+        """
+        if tick is None:
+            self._dispatch(event)
+        else:
+            event.trigger_tick = tick
+            self._tick_schedule[event.id] = (tick, event)
+            logger.info("TimeEventBus 注册定时事件: id=%s type=%s → tick %d",
+                        event.id, event.event_type, tick)
+        return event.id
+
+    def _dispatch(self, event: Event) -> None:
+        """把事件交给下游 (事件发送回调 → EventDispatcher)."""
+        if self._event_sender is not None:
+            try:
+                self._event_sender(event)
+            except Exception:
+                logger.exception("TimeEventBus 事件发送失败: %s", event.event_type)
+        else:
+            logger.debug("TimeEventBus 无事件发送回调, 事件未投递: %s", event.event_type)
+
     # ── 配置 ──────────────────────────────────────────────
 
     def set_event_sender(self, fn: Callable[[Event], None]) -> None:
-        """设置事件发送回调 (发送到事件总线).
+        """设置事件发送回调 (发送到事件分发器).
 
         参数:
-            fn: 接收 Event 对象的回调函数, 如 EventBus.process_event 或 EventDispatcher.trigger.
+            fn: 接收 Event 对象的回调函数, 如 EventDispatcher.trigger.
         """
         self._event_sender = fn
 
@@ -384,26 +449,28 @@ class TimeManager:
                 "owner_role": task.owner_role,
             },
         )
-        logger.info("TimeManager 任务提醒: [%s] %s → %s (tick %d, day %d)",
-                    task.task_id, task.description, task.owner_role, task.target_tick, task.day)
+        logger.info("TimeEventBus 任务提醒: [%s] %s → %s (tick %d, day %d)",
+                    task.task_id, task.description, task.owner_role,
+                    task.target_tick, task.day)
 
-        if self._event_sender is not None:
-            try:
-                self._event_sender(event)
-            except Exception:
-                logger.exception("TimeManager 任务事件发送失败: %s", task.task_id)
+        self._dispatch(event)
 
     def _tick_loop(self) -> None:
-        """时间线程主循环: 周期性检查 Tick, 触发作息事件与到期任务."""
-        logger.debug("TimeManager 线程循环开始")
+        """时间线程主循环: 周期性检查 Tick, 触发作息事件与到期任务/定时事件."""
+        logger.debug("TimeEventBus 线程循环开始")
         while self._running:
             try:
                 self._check_and_fire()
                 self._check_due_tasks()
+                # 调度表中的定时事件 (register_event(tick=N)) 到期投递
+                for ev in self._check_due_events(self.current_tick()):
+                    logger.info("TimeEventBus 定时事件到期投递: id=%s type=%s",
+                                ev.id, ev.event_type)
+                    self._dispatch(ev)
             except Exception:
-                logger.exception("TimeManager 检查异常")
+                logger.exception("TimeEventBus 检查异常")
             time_module.sleep(self.check_interval)
-        logger.debug("TimeManager 线程循环结束")
+        logger.debug("TimeEventBus 线程循环结束")
 
     def _check_and_fire(self) -> None:
         """检查当前 Tick 并触发对应事件 (按天重置, 每天各触发一次)."""
@@ -460,11 +527,13 @@ class TimeManager:
                 "instruction": instruction,
             },
         )
-        logger.info("TimeManager 触发事件: %s (day=%d, tick=%d, time=%s, priority=%s)",
+        logger.info("TimeEventBus 触发事件: %s (day=%d, tick=%d, time=%s, priority=%s)",
                     event_type, day, tick, event.payload["time"], event.priority.name)
 
-        if self._event_sender is not None:
-            try:
-                self._event_sender(event)
-            except Exception:
-                logger.exception("TimeManager 事件发送失败: %s", event_type)
+        self._dispatch(event)
+
+
+# ── 向后兼容别名 ─────────────────────────────────────────
+# TimeManager 已并入 EventBus 成为 TimeEventBus, 保留原名方便既有代码引用
+# (agent_system / roles 等仍 from src.core.time_manager import TimeManager).
+TimeManager = TimeEventBus
