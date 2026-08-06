@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 # ── Configuration ──────────────────────────────────────────
 
 DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
-DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "sk-9198d90e243440aabbac814ad8647f1c")
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash")
 DEEPSEEK_THINKING = os.environ.get("DEEPSEEK_THINKING", "true").lower() in ("1", "true", "yes", "on")
 

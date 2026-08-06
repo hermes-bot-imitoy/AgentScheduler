@@ -22,7 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-os.environ.setdefault("DEEPSEEK_API_KEY", "sk-f29a3265f9e34c3bbf8f86f9142a57c9")
+os.environ.setdefault("DEEPSEEK_API_KEY", "")
 os.environ.setdefault("DEEPSEEK_MODEL", "deepseek-v4-flash")
 os.environ.setdefault("DEEPSEEK_THINKING", "true")
 
