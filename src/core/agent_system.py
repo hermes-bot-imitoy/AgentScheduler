@@ -62,6 +62,9 @@ class AgentSystem:
         # 时间线程的事件 → 事件分发器 (作息事件统一入口)
         self.time_manager.set_event_sender(self._on_time_event)
 
+        # 快进: 全部角色空闲时自动跳到下一个事件 Tick
+        self.time_manager.set_idle_checker(self._all_roles_idle)
+
         # 注册角色
         for role in roles or []:
             self.add_role(role)
@@ -122,7 +125,7 @@ class AgentSystem:
         随后广播给所有角色 (EMERGENCY 穿透过滤).
 
         参数:
-            event: 时间线程发出的 Event.
+            event: 时间线程产生的作息事件.
         """
         if event.event_type == EVENT_SHIFT_START:
             for role in self.pool.all_roles():
@@ -130,6 +133,20 @@ class AgentSystem:
                     role.state = AgentState.ON_DUTY_IDLE
                     logger.info("AgentSystem: SHIFT_START → %s 上班 (ON_DUTY_IDLE)", role.role_id)
         self.dispatcher.trigger(event)
+
+    def _all_roles_idle(self) -> bool:
+        """全部角色是否空闲 (供快进功能判定).
+
+        空闲 = 无正在处理的任务 且 任务队列为空. 角色池为空视为不空闲
+        (避免系统还没加角色时就快进).
+
+        返回:
+            True 表示全部角色空闲.
+        """
+        roles = self.pool.all_roles()
+        if not roles:
+            return False
+        return all(not r.is_busy and r.queue_depth == 0 for r in roles)
 
     def trigger(self, event: Event) -> dict[str, dict[str, Any]]:
         """向事件总线投递事件, 广播给所有角色.

@@ -36,7 +36,7 @@ import threading
 import time as time_module
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Callable, Optional
 
 from src.core.event_bus import EventBus
@@ -58,6 +58,7 @@ TASK_TICK_MIN = 0           # 任务 Tick 范围下限
 TASK_TICK_MAX = 60          # 任务 Tick 范围上限 (工作时间 0~60)
 
 DEFAULT_CHECK_INTERVAL = 30  # 线程检查间隔 (秒)
+FAST_FORWARD_IDLE_SECONDS = 60  # 全角色空闲多少秒后快进 (默认 1 分钟)
 
 
 @dataclass
@@ -128,6 +129,12 @@ class TimeEventBus(EventBus):
     _fired_end: bool = field(default=False, repr=False, init=False)
     _tasks: dict[str, ScheduledTask] = field(default_factory=dict, repr=False, init=False)  # 定时任务表
 
+    # 快进功能: 全角色空闲时跳过等待, 直接跳到下一个事件 Tick
+    _idle_checker: Optional[Callable[[], bool]] = field(default=None, repr=False, init=False)
+    _fast_forward: bool = field(default=True, repr=False, init=False)  # 快进开关
+    _idle_since: Optional[float] = field(default=None, repr=False, init=False)  # 全空闲起始墙钟时间
+    _idle_seconds: float = field(default=FAST_FORWARD_IDLE_SECONDS, repr=False, init=False)
+
     def __post_init__(self) -> None:
         """dataclass 初始化后: 调用父类 EventBus 的 __init__ 建立过滤管线.
 
@@ -183,6 +190,99 @@ class TimeEventBus(EventBus):
             fn: 接收 Event 对象的回调函数, 如 EventDispatcher.trigger.
         """
         self._event_sender = fn
+
+    # ── 快进功能 (全角色空闲时跳过等待) ───────────────────
+
+    def set_idle_checker(self, fn: Callable[[], bool]) -> None:
+        """设置"全部角色是否空闲"判定回调.
+
+        参数:
+            fn: 返回 True 表示所有角色都空闲 (无任务在处理/排队).
+        """
+        self._idle_checker = fn
+
+    def set_fast_forward(self, enabled: bool, idle_seconds: float = 60.0) -> None:
+        """开关快进功能.
+
+        参数:
+            enabled:      True = 启用 (默认), False = 禁用.
+            idle_seconds: 全角色空闲持续多少秒后快进 (默认 60 = 1 分钟).
+        """
+        self._fast_forward = enabled
+        self._idle_seconds = idle_seconds
+        if not enabled:
+            self._idle_since = None
+
+    def _check_fast_forward(self) -> None:
+        """检查是否满足快进条件并执行跳转 (由时间线程周期性调用).
+
+        条件: 快进开启 + 已注入空闲判定 + 全部角色空闲持续 idle_seconds 秒.
+        跳转: 把时钟基准前移, 使 current_tick() 直接到达下一个事件 Tick
+        (调度表定时事件 / 定时任务 / 下班 SHIFT_END; 都没有则跳到当天上班后的
+        下一个作息边界 — 下班优先).
+        """
+        if not self._fast_forward or self._idle_checker is None:
+            return
+        try:
+            all_idle = self._idle_checker()
+        except Exception:
+            logger.exception("快进: 空闲判定回调异常")
+            return
+
+        if not all_idle:
+            self._idle_since = None  # 有人忙, 重置计时
+            return
+
+        if self._idle_since is None:
+            self._idle_since = time_module.time()  # 开始计时
+            return
+
+        if time_module.time() - self._idle_since < self._idle_seconds:
+            return  # 还没到 1 分钟, 继续等
+
+        # 满足条件: 跳到下一个事件 Tick
+        target = self._next_event_tick()
+        now = self.current_tick()
+        if target is None or target <= now:
+            self._idle_since = time_module.time()  # 无目标, 重新计时
+            return
+
+        # 时钟基准前移: 使 elapsed 恰好等于 target Tick 对应的秒数
+        self._start_dt = self._clock() - timedelta(
+            seconds=target * self.minutes_per_tick * 60)
+        self._idle_since = None
+        logger.info("⚡ 快进: 全部角色空闲 ≥%.0fs, 时钟跳到 Tick %d (原 %d)",
+                    self._idle_seconds, target, now)
+
+    def _next_event_tick(self) -> Optional[int]:
+        """计算下一个事件触发 Tick (绝对 Tick).
+
+        候选:
+          1. 调度表中的定时事件 (register_event(tick=N))
+          2. 定时任务 (schedule_task)
+          3. 下班 SHIFT_END (当天 shift_end_tick 的绝对位置)
+
+        返回:
+            大于当前 Tick 的最小候选绝对 Tick; 没有则返回 None.
+        """
+        now = self.current_tick()
+        day = self.day_number()
+        candidates: list[int] = []
+
+        # 1) 调度表定时事件
+        for tk, _ in self._tick_schedule.values():
+            candidates.append(tk)
+        # 2) 定时任务
+        for task in self._tasks.values():
+            candidates.append(task.absolute_fire_tick(self.ticks_per_day))
+        # 3) 当天下班
+        candidates.append(
+            (day - 1) * self.ticks_per_day + self.shift_end_tick)
+
+        future = [c for c in candidates if c > now]
+        if not future:
+            return None
+        return min(future)
 
     def set_clock(self, fn: Callable[[], datetime]) -> None:
         """设置时间源 (默认 datetime.now). 用于模拟测试.
@@ -467,6 +567,8 @@ class TimeEventBus(EventBus):
                     logger.info("TimeEventBus 定时事件到期投递: id=%s type=%s",
                                 ev.id, ev.event_type)
                     self._dispatch(ev)
+                # 快进: 全部角色空闲时跳到下一个事件 Tick
+                self._check_fast_forward()
             except Exception:
                 logger.exception("TimeEventBus 检查异常")
             time_module.sleep(self.check_interval)
