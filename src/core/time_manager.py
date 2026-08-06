@@ -235,6 +235,8 @@ class TimeEventBus(EventBus):
 
         if self._idle_since is None:
             self._idle_since = time_module.time()  # 开始计时
+            logger.debug("全部角色空闲, 开始快进计时 (%.0fs 后跳转)",
+                         self._idle_seconds)
             return
 
         if time_module.time() - self._idle_since < self._idle_seconds:
@@ -245,12 +247,16 @@ class TimeEventBus(EventBus):
         now = self.current_tick()
         if target is None or target <= now:
             self._idle_since = time_module.time()  # 无目标, 重新计时
+            logger.debug("全部角色空闲 %.0fs, 但无下一个事件 Tick, 继续等待",
+                         self._idle_seconds)
             return
 
         # 时钟基准前移: 使 elapsed 恰好等于 target Tick 对应的秒数
         self._start_dt = self._clock() - timedelta(
             seconds=target * self.minutes_per_tick * 60)
         self._idle_since = None
+        logger.debug("全部角色已空闲 %.0fs, 快进到下一个事件 Tick %d (原 %d)",
+                     self._idle_seconds, target, now)
         logger.info("⚡ 快进: 全部角色空闲 ≥%.0fs, 时钟跳到 Tick %d (原 %d)",
                     self._idle_seconds, target, now)
 
