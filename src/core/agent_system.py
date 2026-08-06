@@ -132,6 +132,14 @@ class AgentSystem:
                 if role.state != AgentState.ON_DUTY_IDLE:
                     role.state = AgentState.ON_DUTY_IDLE
                     logger.info("AgentSystem: SHIFT_START → %s 上班 (ON_DUTY_IDLE)", role.role_id)
+                # 上班自动开机 (下班后 summary 已自动关机)
+                try:
+                    if role._computer is not None and not role._computer.is_on:
+                        role._computer.power_on()
+                        logger.info("AgentSystem: SHIFT_START → %s 电脑已自动开机",
+                                    role.role_id)
+                except Exception:
+                    logger.exception("AgentSystem: %s 上班开机失败", role.role_id)
         self.dispatcher.trigger(event)
 
     def _all_roles_idle(self) -> bool:
