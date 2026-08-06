@@ -1,5 +1,7 @@
 # Shift & Event-Driven Agent Scheduler
 
+> 项目还在开发中，按照 DeepSeek 的说法运行起来是没有问题的。但没有进行广泛测试。
+
 基于**企业作息与事件驱动**理念的多角色 AI Agent 调度框架。
 
 打破传统 Agent `while(true)` 循环，解决"长任务 Context 爆炸、状态不可恢复、Token 成本失控、权限无隔离"问题。
