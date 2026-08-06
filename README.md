@@ -1,6 +1,8 @@
 # Shift & Event-Driven Agent Scheduler
 
 > 项目还在开发中，按照 DeepSeek 的说法运行起来是没有问题的。但没有进行广泛测试。
+> 项目基于 Hermes + DeepSeek 开发，会优先适配 DeepSeek。现阶段还在搭框架与测试的早期阶段，后续会逐步建立并完善各模块。
+> 下面的部分是 Hermes 写的。其中带引用部分是作者补充的
 
 基于**企业作息与事件驱动**理念的多角色 AI Agent 调度框架。
 
@@ -72,6 +74,8 @@
 | Layer 2 | Salience Evaluator | 关键词匹配 + 优先级加权计算显著性 | 0 |
 | Layer 3 | Wake | 通过前两层的事件唤醒 Agent 工作流 | 按需 |
 
+> 这部分后续可能会训练一个小模型来完成过滤，目前训练貌似没什么价值。
+
 ### 3. 快进功能 (`src/core/time_manager.py`)
 
 真实时间模式下不必干等：全部角色空闲（无任务处理/排队）持续 **1 分钟**后，
@@ -137,6 +141,9 @@ HR 发布招聘 → 后台 `RoleFactory` 生成新人 → **立即加入运行�
 - 每天下班调 `summary` 保存当日总结（`_summary_day_<N>.md`，落在角色电脑 notes/）
 - 第二天 `build_system_prompt()` 自动注入 `[昨日总结]`（严格早于今天的最近一篇）
 - 前提是电脑已开机 —— SHIFT_START 上班自动开机保证了这点
+
+> 记忆系统依赖天循环：作为人来说，昨天上班的碎片化记忆就是今天的记忆。所以每天都会有总结。
+> 同时，记忆还包括笔记、任务和工作区的文件等。这些是外部记忆，如果不主动翻是不知道的。
 
 ### 11. 12 个预定义角色模板 (`src/core/role_templates.py`)
 
@@ -206,7 +213,7 @@ maf_scheduler/
 ### 前置条件
 
 - Python 3.10+，`pip install -r requirements.txt`（或使用项目自带 `.venv/`）
-- [podman](https://podman.io/)（每角色电脑的容器运行时；缺失时自动降级本地目录模拟）
+- [podman](https://podman.io/)（每角色电脑的容器运行时；缺失时自动降级本地目录模拟，但强烈建议使用 podman 容器，本地目录没有测试，未来也不会使用本地目录作为运行时）
 - DeepSeek API Key（环境变量 `DEEPSEEK_API_KEY`）
 
 ```bash
