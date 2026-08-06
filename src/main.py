@@ -5,7 +5,7 @@
   - 1 Tick = 10 真实分钟, 系统启动 = Tick 0 / 第 1 天
   - Tick 60 (10 小时后) 自动触发 SHIFT_END → 角色调 summary 下班
   - 24 小时 (144 Tick) 后自动进入第 2 天 (SHIFT_START)
-  - 每天结束询问用户: 是否继续下一天? 是 → 等下一自然日, 否 → 退出
+  - 一天结束后自动进入第二天, 打印醒目横幅标题 (无需用户干预)
 
 流程:
   第 1 天: CEO 注册 Tick 1 任务 (10 分钟后) 与用户沟通项目要求
@@ -116,15 +116,6 @@ def wait_until(desc: str, predicate, timeout_seconds: float) -> bool:
         time_module.sleep(5)
     warn(f"等待超时: {desc}")
     return False
-
-
-def ask_continue() -> bool:
-    """询问用户是否继续下一天. 返回 True=继续, False=结束."""
-    try:
-        ans = input(f"\n  {BOLD}一天结束, 是否继续下一天? (y/n): {RESET}").strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        return False
-    return ans in ("y", "yes", "是", "")
 
 
 def run_one_day(system: AgentSystem, day: int, with_client_task: bool) -> None:
@@ -240,17 +231,20 @@ def main() -> None:
     states = {rid: system.get_role(rid).state.value for rid in ROLE_IDS}
     info(f"角色状态: {states}")
 
-    # ── 3. 多日循环: 第 1 天有甲方沟通, 之后重复日常 ────────
+    # ── 3. 多日循环: 第 1 天有甲方沟通, 之后自动进入下一天 ──
     day = 1
     while True:
         run_one_day(system, day, with_client_task=(day == 1))
 
-        # 一天结束: 询问用户是否继续 (继续 = 等 14 小时后第 2 天上班)
-        if not ask_continue():
-            _console_print(f"\n  {YELLOW}停止循环, 系统关闭.{RESET}")
-            break
-        day += 1
-        info(f"已确认继续: 第 {day} 天将于约 {DAY_BOUNDARY_HOURS - SHIFT_END_HOURS} 小时后开始.")
+        # 一天结束: 自动进入第二天 (不再询问用户), 打印醒目横幅
+        next_day = day + 1
+        _console_print(f"\n{BOLD}{GREEN}{'═' * 62}{RESET}")
+        _console_print(f"{BOLD}{GREEN}  🎉 第 {day} 天结束!{RESET}")
+        _console_print(f"{BOLD}{GREEN}  已自动进入第 {next_day} 天: 将于约 "
+                       f"{DAY_BOUNDARY_HOURS - SHIFT_END_HOURS} 小时后上班 "
+                       f"(SHIFT_START 自动触发){RESET}")
+        _console_print(f"{BOLD}{GREEN}{'═' * 62}{RESET}\n")
+        day = next_day
 
     system.stop()
     _console_print(f"\n{BOLD}{GREEN}演示完成 ✓{RESET} (共运行 {day} 天)")
