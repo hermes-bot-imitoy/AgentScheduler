@@ -1,6 +1,6 @@
-# MAF Shift & Event-Driven Agent Scheduler
+# Shift & Event-Driven Agent Scheduler
 
-基于 Microsoft Agent Framework 理念的**企业作息与事件驱动 Agent 调度框架**。
+基于**企业作息与事件驱动**理念的多角色 AI Agent 调度框架。
 
 打破传统 Agent `while(true)` 循环，解决"长任务 Context 爆炸、状态不可恢复、Token 成本失控、权限无隔离"问题。
 
@@ -187,7 +187,7 @@ maf_scheduler/
 │   │   └── talk_toolkit.py    # talk / list_roles (角色间通信)
 │   ├── storage/
 │   │   └── ambient_buffer.py  # 潜意识事件暂存
-│   ├── workflow/              # MAF 风格工作流 (预留)
+│   ├── workflow/              # 工作流 (预留)
 │   ├── config/
 │   │   └── mcp_group_rules.json  # MCP 服务器与工具分组配置
 │   ├── main.py                # 主入口: 多日循环 (自动进入第二天)

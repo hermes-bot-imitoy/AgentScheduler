@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""MAF 作息系统演示 — 真实时间流动 (TimeManager 自动走时).
+"""作息系统演示 — 真实时间流动 (TimeManager 自动走时).
 
 与之前"模拟时钟大步跳跃"不同, 本版本不注入模拟时钟:
   - 1 Tick = 10 真实分钟, 系统启动 = Tick 0 / 第 1 天
@@ -211,7 +211,7 @@ def run_one_day(system: AgentSystem, day: int, with_client_task: bool) -> None:
 
 
 def main() -> None:
-    header("MAF 作息系统演示 — 真实时间流动 (1 Tick = 10 分钟)")
+    header("作息系统演示 — 真实时间流动 (1 Tick = 10 分钟)")
 
     # ── 1. 开局: 默认角色 (CEO/COO/HR) + CEO 甲方交流工具 ──
     step(f"创建 AgentSystem, 加入 {len(ROLE_IDS)} 个默认角色 ({'/'.join(ROLE_IDS)})...")
