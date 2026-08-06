@@ -451,7 +451,7 @@ class AgentRole:
             round_no += 1
 
             content, raw_calls, usage = self._llm.chat_with_tools(
-                messages, openai_tools, 0.7, 1024,
+                messages, openai_tools, 0.7, None,  # max_tokens=None = 无上限 (长内容不截断)
             )
             round_tokens = usage.get("total_tokens", 0) if usage else 0
             total_tokens += round_tokens

@@ -213,7 +213,7 @@ class DeepSeekLLM:
         messages: list[dict],
         tools: list[dict],
         temperature: float = DEFAULT_TEMPERATURE,
-        max_tokens: int = 1024,
+        max_tokens: Optional[int] = None,
     ) -> tuple[str, list[dict], Optional[dict]]:
         """原生 function calling 请求 (OpenAI 兼容).
 
@@ -234,19 +234,24 @@ class DeepSeekLLM:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
+        # 无上限: max_tokens=None 时不传该字段 (由模型决定最大输出, 避免
+        # 长内容 JSON 被 1024 token 截断 → 非法 JSON 死循环). 上限限制以后再加.
         payload: dict = {
             "model": self.model,
             "messages": messages,
             "temperature": temperature,
-            "max_tokens": max_tokens,
             "tools": tools,
             "tool_choice": "auto",
         }
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
 
         # 与 chat() 相同的 thinking 模式处理
         if self.thinking:
             payload["thinking"] = {"type": "enabled"}
-            if max_tokens < 1024:
+            # thinking 模式下 DeepSeek 要求 max_tokens >= 1024;
+            # 未显式指定时给个足够大的值 (输出无实际截断感)
+            if max_tokens is not None and max_tokens < 1024:
                 payload["max_tokens"] = 1024
 
         self._debug(
