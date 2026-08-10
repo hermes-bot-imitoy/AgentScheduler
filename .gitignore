@@ -3,9 +3,10 @@ __pycache__/
 *.pyo
 data/journals/
 data/notes/
-# 运行时数据: 角色个人电脑目录 (LLM 生成产物) + 演示日志, 不入库
+# 运行时数据: 角色个人电脑目录 (LLM 生成产物) + 演示日志 + 技能库, 不入库
 data/computers/
 data/main_run.log
+data/skills/
 .DS_Store
 *.egg-info/
 dist/

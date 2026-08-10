@@ -369,6 +369,11 @@ class AgentRole:
             from src.python_tools.mcp_manager import bind_mcp_manager_to_toolkit
             bind_mcp_manager_to_toolkit(toolkit, self)
 
+        # 技能管理工具类自动绑定该角色 (skill_add/remove 需要知道当前角色是谁)
+        if toolkit.name == "skill_manager":
+            from src.python_tools.skill_toolkit import bind_role_to_toolkit
+            bind_role_to_toolkit(toolkit, self)
+
         # HR 工具类自动绑定该角色 (发布招聘后新员工加入团队, 需要 RolePool 引用)
         if toolkit.name == "hr":
             from src.python_tools.hr_toolkit import bind_role_to_toolkit

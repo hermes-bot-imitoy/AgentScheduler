@@ -30,11 +30,15 @@ from src.python_tools.task_toolkit import create_task_toolkit
 from src.python_tools.time_toolkit import create_time_toolkit
 from src.python_tools.mcp_manager import MCPManager, create_mcp_manager_toolkit
 from src.python_tools.computer_toolkit import create_computer_toolkit
+from src.python_tools.skill_toolkit import SkillManager, create_skill_manager_toolkit
 
 # 全局共享 MCP 管理器 (懒加载: 首次调用 mcp_* 工具时才连接服务器).
 # 所有角色共享同一份工具池, 但每个角色 add_toolkit 时拿到独立的工具类实例
 # (角色引用由 AgentRole.add_toolkit 自动绑定, 互不干扰).
 _MCP_MANAGER = MCPManager()
+
+# 全局共享技能库管理器 (懒扫描: 首次调用 skill_* 工具时扫描 data/skills/).
+_SKILL_MANAGER = SkillManager()
 
 # 默认工具类注册表: {名称: 工厂函数}
 # 角色被添加进 AgentSystem 时 (auto_toolkits=True) 自动逐个加载.
@@ -44,6 +48,7 @@ DEFAULT_TOOLKITS: dict[str, Callable[[], object]] = {
     "task": create_task_toolkit,
     "computer": create_computer_toolkit,          # run_command / computer_status / reboot
     "mcp_manager": lambda: create_mcp_manager_toolkit(_MCP_MANAGER),
+    "skill_manager": lambda: create_skill_manager_toolkit(_SKILL_MANAGER),
 }
 
 # 默认 MCP 工具组: 角色加入/启动时自动把该组的 MCP 工具安装到个人电脑
