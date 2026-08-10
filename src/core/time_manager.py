@@ -620,6 +620,12 @@ class TimeEventBus(EventBus):
                 for ev in self._check_due_events(self.current_tick()):
                     logger.info("TimeEventBus 定时事件到期投递: id=%s type=%s",
                                 ev.id, ev.event_type)
+                    # 任务提醒触发后标记 fired, 防止隔天 SHIFT_START 重新注册重复触发
+                    if ev.event_type == EVENT_TASK_DUE:
+                        tid: Optional[str] = ev.payload.get("task_id")
+                        task = self._tasks.get(tid or "")
+                        if task is not None:
+                            task.fired = True
                     self._dispatch(ev)
                 # 快进: 全部角色空闲时跳到下一个事件 Tick
                 self._check_fast_forward()

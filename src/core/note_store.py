@@ -203,15 +203,18 @@ class NoteStore:
         返回:
             最近总结内容, 没有则返回 None.
         """
-        candidates = sorted(self._list_md_files(), reverse=True)
-        for p in candidates:
-            # 文件名格式: _summary_day_<N>.md
+        # 按天数值降序 (文件名 _summary_day_<N>.md 字典序会排错: day_9 > day_10)
+        candidates = []
+        for p in self._list_md_files():
             if not p.name.startswith("_summary_day_"):
                 continue
             try:
                 d = int(p.name[len("_summary_day_"):-len(".md")])
             except ValueError:
                 continue
+            candidates.append((d, p))
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        for d, p in candidates:
             if before_day is None or d < before_day:
                 content = self._read(str(self._dir / p.name))
                 if content is not None:

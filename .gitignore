@@ -3,9 +3,13 @@ __pycache__/
 *.pyo
 data/journals/
 data/notes/
+# 运行时数据: 角色个人电脑目录 (LLM 生成产物) + 演示日志, 不入库
+data/computers/
+data/main_run.log
 .DS_Store
 *.egg-info/
 dist/
 build/
 .venv/
 venv/
+.vscode/
