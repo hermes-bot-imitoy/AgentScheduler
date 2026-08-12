@@ -258,10 +258,6 @@ class LocalComputer(Computer):
 
     def _resolve(self, path: str) -> Path:
         p = Path(path)
-        # workdir 本身是绝对路径时, 子路径直接拼接; 相对路径则落到工作目录
-        work = str(self._dir)
-        if str(p).startswith(work):
-            return p
         if not p.is_absolute():
             p = self._dir / p
         return p
@@ -309,7 +305,8 @@ class PodmanComputer(Computer):
     """Podman 容器虚拟电脑.
 
     每个角色一个容器 (名 maf-<role_id>), 命令经 podman exec 执行.
-    本机无 podman 命令时自动降级为 LocalComputer (见 __init__).
+    需要本机安装 podman; 未安装时构造直接抛 RuntimeError
+    (如需本地模拟请显式用 create_computer(kind='local')).
 
     参数:
         role_id: 角色标识.
@@ -322,36 +319,27 @@ class PodmanComputer(Computer):
         self.image = image
         self.container_name = f"maf-{role_id or 'shared'}"
         if shutil.which("podman") is None:
-            logger.warning(
-                "Podman 未安装, 角色 %s 的电脑降级为本地目录模拟 (LocalComputer)",
-                role_id,
+            raise RuntimeError(
+                f"Podman 未安装, 无法创建角色 {role_id} 的电脑容器 "
+                f"(PodmanComputer 需要 podman; 如需本地模拟请显式使用 "
+                f"create_computer(kind='local'))."
             )
-            self._fallback = LocalComputer(role_id, auto_mcp=auto_mcp)
-        else:
-            self._fallback = None
 
     @property
     def host_dir(self) -> str:
-        # 降级: 透传本地电脑的宿主机目录
-        if self._fallback is not None:
-            return self._fallback.host_dir
         # 容器挂载的宿主机目录: data/computers/<role> ↔ 容器内 /home/agent
         return str((Path("./data/computers").resolve() / (self.role_id or "shared")))
 
     @property
     def workdir(self) -> str:
-        if self._fallback is not None:
-            return self._fallback.workdir
         return "/home/agent"
 
     def get_lan_ip(self) -> str:
         """获取本电脑在自定义桥接网络 (maf-net) 中的 IP 地址.
 
         返回:
-            IP 字符串; 降级本地模拟返回 localhost; 查不到返回空串.
+            IP 字符串; 查不到返回空串.
         """
-        if self._fallback is not None:
-            return "127.0.0.1 (本地模拟)"
         try:
             # 网络名含连字符, Go template 必须用 index 取 (直接 .maf-net 会被当减号)
             fmt = '{{(index .NetworkSettings.Networks "%s").IPAddress}}' % DEFAULT_NETWORK_NAME
@@ -368,11 +356,7 @@ class PodmanComputer(Computer):
         C 方案: MCP 服务器跑在容器内 (podman exec -i 保持 stdio 管道),
         授权目录 = 容器内 workdir (/home/agent) — 与 LLM 看到的路径字面一致,
         不再有宿主机/容器路径空间不一致的问题.
-
-        降级 (无 podman) 时走 LocalComputer (宿主机 npx, 授权 data/computers/<role>).
         """
-        if self._fallback is not None:
-            return self._fallback.install_mcp_server()
         if self._mcp_server is not None:
             return self.list_installed_mcp_tools()
         if not self._auto_mcp:
@@ -465,10 +449,6 @@ class PodmanComputer(Computer):
         self._mcp_pkg_flag = value
 
     def power_on(self) -> str:
-        if self._fallback is not None:
-            r = self._fallback.power_on()
-            self._on = self._fallback.is_on  # 同步状态
-            return r
         try:
             self._ensure_container()
             self._on = True
@@ -478,10 +458,6 @@ class PodmanComputer(Computer):
             return f"错误: 开机失败 - {exc}"
 
     def power_off(self) -> str:
-        if self._fallback is not None:
-            r = self._fallback.power_off()
-            self._on = self._fallback.is_on  # 同步状态
-            return r
         try:
             self._pod("stop", self.container_name)
             self._on = False
@@ -490,8 +466,6 @@ class PodmanComputer(Computer):
             return f"错误: 关机失败 - {exc}"
 
     def run_command(self, command: str) -> str:
-        if self._fallback is not None:
-            return self._fallback.run_command(command)
         if not self._on:
             return "错误: 电脑未开机."
         try:
@@ -504,13 +478,9 @@ class PodmanComputer(Computer):
             return f"错误: 命令执行失败 - {exc}"
 
     def read_file(self, path: str) -> str:
-        if self._fallback is not None:
-            return self._fallback.read_file(path)
         return self.run_command(f"cat '{path}'")
 
     def write_file(self, path: str, content: str) -> str:
-        if self._fallback is not None:
-            return self._fallback.write_file(path, content)
         # 用 heredoc 写入容器内文件: $(dirname) 必须可展开 → 用双引号包 $(),
         # 内部路径用单引号保护空格
         escaped = content.replace("'", "'\\''")
@@ -519,14 +489,10 @@ class PodmanComputer(Computer):
         )
 
     def list_dir(self, path: str = "") -> str:
-        if self._fallback is not None:
-            return self._fallback.list_dir(path)
         target = path or self.workdir
         return self.run_command(f"ls -la '{target}'")
 
     def describe(self) -> str:
-        if self._fallback is not None:
-            return self._fallback.describe()
         return (f"电脑[{self.role_id}] (podman 容器 {self.container_name}): "
                 f"状态={'开机' if self._on else '关机'}, 工作目录={self.workdir}")
 
@@ -742,8 +708,8 @@ class ComputerManager:
                 comp.power_off()
         except Exception:
             logger.warning("电脑[%s] 关机失败 (销毁继续)", role_id, exc_info=True)
-        # 删除 podman 容器 (仅真实容器, 降级 LocalComputer 无容器)
-        if isinstance(comp, PodmanComputer) and comp._fallback is None:
+        # 删除 podman 容器 (仅真实容器; LocalComputer 无容器)
+        if isinstance(comp, PodmanComputer):
             try:
                 comp._pod("rm", "-f", comp.container_name)
                 logger.info("电脑[%s] 容器已删除: %s", role_id, comp.container_name)

@@ -45,7 +45,7 @@ def create_time_toolkit() -> ToolKit:
         """
         manager = tk._time_holder["manager"]  # type: ignore[attr-defined]
         if manager is None:
-            raise RuntimeError("时间工具类尚未绑定 TimeManager, 请通过 role.add_toolkit() 注册")
+            raise RuntimeError("时间工具类尚未绑定 TimeEventBus, 请通过 role.add_toolkit() 注册")
 
         tick = manager.current_tick()
         return manager.describe() + f"\n当前 Tick 数: {tick}"
@@ -65,7 +65,7 @@ def create_time_toolkit() -> ToolKit:
         manager = tk._time_holder["manager"]  # type: ignore[attr-defined]
         role = tk._time_holder["role"]  # type: ignore[attr-defined]
         if manager is None:
-            raise RuntimeError("时间工具类尚未绑定 TimeManager, 请通过 role.add_toolkit() 注册")
+            raise RuntimeError("时间工具类尚未绑定 TimeEventBus, 请通过 role.add_toolkit() 注册")
 
         # 进入休息状态: ON_DUTY_IDLE (上班空闲, 不拦截事件, 等事件唤醒)
         from src.core.types import AgentState
@@ -104,11 +104,11 @@ def create_time_toolkit() -> ToolKit:
 
 
 def bind_time_to_toolkit(toolkit: ToolKit, manager: Any, role: Any = None) -> None:
-    """将 TimeManager 绑定到时间工具类 (由 AgentRole.add_toolkit 内部调用).
+    """将 TimeEventBus 绑定到时间工具类 (由 AgentRole.add_toolkit 内部调用).
 
     参数:
         toolkit:  时间工具类实例
-        manager:  TimeManager 实例
+        manager:  TimeEventBus 实例
         role:     绑定的 AgentRole (可选, 用于休息时设置状态)
     """
     toolkit._time_holder["manager"] = manager  # type: ignore[attr-defined]

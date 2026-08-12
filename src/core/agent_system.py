@@ -1,9 +1,9 @@
-"""系统管理类 (AgentSystem) — 统一管理 TimeManager + RolePool + 事件总线.
+"""系统管理类 (AgentSystem) — 统一管理 TimeEventBus + RolePool + 事件总线.
 
 职责:
-  - 创建唯一的共享 TimeManager (单一时间源) 并绑定到所有角色
+  - 创建唯一的共享 TimeEventBus (单一时间源) 并绑定到所有角色
   - 创建 RolePool, 自动为角色注册 memory / time 工具类
-  - 将 TimeManager 的作息事件 (SHIFT_START / SHIFT_END) 接入事件分发器
+  - 将 TimeEventBus 的作息事件 (SHIFT_START / SHIFT_END) 接入事件分发器
   - 统一 start / stop 生命周期
   - 对外提供事件投递 / 任务分配 / 状态查询
 
@@ -27,7 +27,7 @@ from typing import Any, Optional
 from src.core.dispatcher import EventDispatcher
 from src.core.roles import RolePool
 from src.core.role_templates import DEFAULT_ROLES, get_template
-from src.core.time_manager import EVENT_SHIFT_START, TimeManager
+from src.core.time_manager import EVENT_SHIFT_START, TimeEventBus
 from src.core.types import AgentState, Event
 from src.python_tools import DEFAULT_TOOLKITS
 
@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 
 class AgentSystem:
-    """统一管理 TimeManager 与 RolePool 的系统管理类.
+    """统一管理 TimeEventBus 与 RolePool 的系统管理类.
 
     参数:
         roles:          预构建的 AgentRole 列表 (可选).
@@ -51,8 +51,8 @@ class AgentSystem:
         check_interval: int = 30,
         auto_toolkits: bool = True,
     ):
-        # 共享时间源: 所有角色绑定同一个 TimeManager
-        self.time_manager = TimeManager(check_interval=check_interval)
+        # 共享时间源: 所有角色绑定同一个 TimeEventBus
+        self.time_manager = TimeEventBus(check_interval=check_interval)
 
         # 角色池
         self.pool = RolePool()
@@ -74,7 +74,7 @@ class AgentSystem:
     # ── 角色管理 ──────────────────────────────────────────
 
     def add_role(self, role: Any) -> Any:
-        """注册角色: 绑定共享 TimeManager + 自动注册工具类.
+        """注册角色: 绑定共享 TimeEventBus + 自动注册工具类.
 
         参数:
             role: AgentRole 实例.
@@ -193,7 +193,7 @@ class AgentSystem:
         self.pool.shutdown(wait=False)
         logger.info("AgentSystem 已停止")
 
-    # ── 时间查询 (转发共享 TimeManager) ───────────────────
+    # ── 时间查询 (转发共享 TimeEventBus) ───────────────────
 
     @property
     def tick(self) -> int:

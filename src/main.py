@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""作息系统演示 — 真实时间流动 (TimeManager 自动走时).
+"""作息系统演示 — 真实时间流动 (TimeEventBus 自动走时).
 
 与之前"模拟时钟大步跳跃"不同, 本版本不注入模拟时钟:
   - 1 Tick = 10 真实分钟, 系统启动 = Tick 0 / 第 1 天
@@ -119,7 +119,7 @@ def wait_until(desc: str, predicate, timeout_seconds: float) -> bool:
 
 
 def run_one_day(system: AgentSystem, day: int, with_client_task: bool) -> None:
-    """运行一天的完整流程 (真实时间, 由 TimeManager 自动走时).
+    """运行一天的完整流程 (真实时间, 由 TimeEventBus 自动走时).
 
     参数:
         system:           AgentSystem 实例

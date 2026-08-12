@@ -1,6 +1,6 @@
 """时间与事件总线 (TimeEventBus) — 以 Tick 为单位的作息时间 + 3 层过滤事件总线.
 
-TimeManager 已并入 EventBus: TimeEventBus(EventBus) 既是时间源 (时钟/Tick/天),
+TimeEventBus 已并入 EventBus: TimeEventBus(EventBus) 既是时间源 (时钟/Tick/天),
 又是事件总线 (3 层过滤管线 + 定时事件调度表). 时间与事件深度绑定:
 向总线注册事件时可指定触发 Tick (不传默认立即触发).
 
@@ -63,7 +63,7 @@ FAST_FORWARD_IDLE_SECONDS = 60  # 全角色空闲多少秒后快进 (默认 1 �
 
 @dataclass
 class ScheduledTask:
-    """定时任务 (注册到 TimeManager, 到达指定 Tick 触发提醒事件).
+    """定时任务 (注册到 TimeEventBus, 到达指定 Tick 触发提醒事件).
 
     参数:
         task_id:      任务 ID (自动生成)
@@ -90,9 +90,9 @@ class ScheduledTask:
 
 @dataclass
 class TimeEventBus(EventBus):
-    """时间与事件深度绑定的事件总线 (TimeManager 并入 EventBus).
+    """时间与事件深度绑定的事件总线 (TimeEventBus 并入 EventBus).
 
-    继承 EventBus 的 3 层过滤管线, 并承担原 TimeManager 的全部职责:
+    继承 EventBus 的 3 层过滤管线, 并承担原 TimeEventBus 的全部职责:
       - 以 Tick 为单位的作息时间 (时钟/tick/天/上下班)
       - 时间线程 (周期性检查, 触发作息事件与到期定时事件)
       - 定时任务管理 (schedule_task 等, 底层复用 register_event 调度表)
@@ -412,7 +412,7 @@ class TimeEventBus(EventBus):
             target=self._tick_loop, name="time-manager", daemon=True,
         )
         self._thread.start()
-        logger.info("TimeManager 时间线程已启动 (启动时刻 = Tick 0 / 第 1 天, 检查间隔 %ds)",
+        logger.info("TimeEventBus 时间线程已启动 (启动时刻 = Tick 0 / 第 1 天, 检查间隔 %ds)",
                     self.check_interval)
 
     def stop(self) -> None:
@@ -421,7 +421,7 @@ class TimeEventBus(EventBus):
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=3)
         self._thread = None
-        logger.info("TimeManager 时间线程已停止")
+        logger.info("TimeEventBus 时间线程已停止")
 
     @property
     def is_running(self) -> bool:
@@ -467,7 +467,7 @@ class TimeEventBus(EventBus):
 
         # 只保存任务列表; 当天任务直接注册事件, 隔天任务等目标天上班时自动加载
         self._register_task_event_if_today(task)
-        logger.info("TimeManager: 定时任务已注册 [%s] %s → tick %d (day %d), 所有者 %s",
+        logger.info("TimeEventBus: 定时任务已注册 [%s] %s → tick %d (day %d), 所有者 %s",
                     task.task_id, description, target_tick, task.day, owner_role)
         return task
 
@@ -486,7 +486,7 @@ class TimeEventBus(EventBus):
             True = 已注册 (当天/已过期), False = 隔天, 仅保存.
         """
         if task.day > self.day_number():
-            logger.info("TimeManager: 任务 [%s] 是隔天任务 (day %d), 仅保存, "
+            logger.info("TimeEventBus: 任务 [%s] 是隔天任务 (day %d), 仅保存, "
                         "目标天上班时自动加载到事件总线", task.task_id, task.day)
             return False
         self.register_event(
@@ -525,7 +525,7 @@ class TimeEventBus(EventBus):
             if task.day <= today and self._register_task_event_if_today(task):
                 loaded += 1
         if loaded:
-            logger.info("TimeManager: 上班加载 %d 个当天任务到事件总线", loaded)
+            logger.info("TimeEventBus: 上班加载 %d 个当天任务到事件总线", loaded)
 
     def _cancel_task_event(self, task_id: str) -> bool:
         """从事件调度表取消某任务对应的事件 (任务被删除/编辑时)."""
@@ -587,7 +587,7 @@ class TimeEventBus(EventBus):
             task.day = day
         # 编辑后重新注册 (当天任务) — 隔天任务仅保存, 上班时自动加载
         self._register_task_event_if_today(task)
-        logger.info("TimeManager: 定时任务已编辑 [%s] → tick %d (day %d)", task_id, task.target_tick, task.day)
+        logger.info("TimeEventBus: 定时任务已编辑 [%s] → tick %d (day %d)", task_id, task.target_tick, task.day)
         return task
 
     def cancel_task(self, task_id: str) -> bool:
@@ -602,7 +602,7 @@ class TimeEventBus(EventBus):
         if task_id in self._tasks:
             del self._tasks[task_id]
             self._cancel_task_event(task_id)
-            logger.info("TimeManager: 定时任务已删除 [%s]", task_id)
+            logger.info("TimeEventBus: 定时任务已删除 [%s]", task_id)
             return True
         return False
 
@@ -644,7 +644,7 @@ class TimeEventBus(EventBus):
             self._fired_day = day
             self._fired_start = False
             self._fired_end = False
-            logger.info("TimeManager: 进入第 %d 天", day)
+            logger.info("TimeEventBus: 进入第 %d 天", day)
 
         # 上班事件 (每天触发一次; 条件用区间而非严格 ==, 避免错过 tick 0 窗口
         # 导致当天 SHIFT_START 永久丢失 — 模拟时钟大步跳/系统挂起恢复时会发生)
@@ -698,6 +698,6 @@ class TimeEventBus(EventBus):
 
 
 # ── 向后兼容别名 ─────────────────────────────────────────
-# TimeManager 已并入 EventBus 成为 TimeEventBus, 保留原名方便既有代码引用
-# (agent_system / roles 等仍 from src.core.time_manager import TimeManager).
-TimeManager = TimeEventBus
+# TimeEventBus 已并入 EventBus 成为 TimeEventBus, 保留原名方便既有代码引用
+# (agent_system / roles 等仍 from src.core.time_manager import TimeEventBus).
+# (TimeEventBus 兼容别名已移除 — 统一使用 TimeEventBus)

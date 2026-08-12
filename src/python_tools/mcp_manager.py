@@ -1,16 +1,14 @@
-"""MCP 工具管理类 (MCPManager) — 为每个角色管理 MCP 工具.
+"""
+MCP 工具管理类 (MCPManager) — 管理每角色电脑上的 MCP 服务器工具.
 
-功能:
-  - 懒加载本地配置的 MCP 服务器 (默认 filesystem + github, 见 mcp_group_rules.json)
-  - 搜索本地已有的 MCP 工具 (按名称/描述关键词)
-  - 为指定角色添加/删除 MCP 工具 (注册进角色的 ToolRegistry)
-  - 查询角色已添加的 MCP 工具
+架构 (C 方案, 2026-08): 每个角色的电脑 (podman 容器) 内运行独立的
+MCP filesystem 服务器, 授权目录 = 容器内 /home/agent. MCPManager 不维护
+全局工具池, 所有查询/安装都基于当前角色自己的电脑服务器.
 
 同时把管理操作打包成 LLM tool-call 工具 (mcp_manager 工具类):
-  - mcp_search / mcp_list      — 搜索、列出可用 MCP 工具
+  - mcp_search / mcp_list      — 搜索、列出本电脑 MCP 服务器上的工具
   - mcp_add / mcp_remove       — 为当前角色添加/移除工具
   - mcp_my_tools               — 查看当前角色已添加的工具
-角色获得该工具类后, 即可自主寻找并使用自己所需的 MCP 工具.
 
 用法:
     from src.python_tools.mcp_manager import MCPManager, create_mcp_manager_toolkit
@@ -19,127 +17,27 @@
     tk = create_mcp_manager_toolkit(mgr)      # 打包成 LLM 工具类
     role.add_toolkit(tk)                      # add_toolkit 自动绑定当前角色
     # 或编程式:
-    mgr.search_tools("file")                  # 搜索
     mgr.add_tool(role, "read_file")           # 给角色添加工具
 """
 
 from __future__ import annotations
 
 import logging
-from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
-from src.core.tools import ToolDef, ToolKit
+from src.core.tools import ToolKit
 
 logger = logging.getLogger(__name__)
 
-# 默认分组规则文件 (相对项目根)
-DEFAULT_RULES_FILE = Path(__file__).resolve().parent.parent / "config" / "mcp_group_rules.json"
-
-# filesystem 服务器需要授权目录参数, 默认授权项目根
-DEFAULT_SERVER_ARGS: dict[str, list[str]] = {
-    "@modelcontextprotocol/server-filesystem": ["."],
-}
-
 
 class MCPManager:
-    """全局 MCP 工具管理器: 加载工具池, 为每个角色登记/撤销工具.
+    """MCP 工具管理器: 管理每角色电脑上的 MCP 服务器工具.
 
-    参数:
-        rules_file:   分组规则 JSON 路径 (默认读取 src/config/mcp_group_rules.json).
-        server_args:  服务器附加参数, 如 filesystem 的授权目录.
-        loader:       可注入自定义 MCPToolLoader (测试用).
+    不维护全局工具池 — 工具都来自角色自己的电脑服务器 (C 方案).
     """
 
-    def __init__(
-        self,
-        rules_file: str | Path | None = None,
-        server_args: dict[str, list[str]] | None = None,
-        loader: Any = None,
-    ):
-        self.rules_file = Path(rules_file) if rules_file else DEFAULT_RULES_FILE
-        self.server_args = server_args if server_args is not None else DEFAULT_SERVER_ARGS
-        self._loader = loader  # 惰性创建
-        self._toolkit_groups: dict[str, ToolKit] = {}   # 组名 → ToolKit (加载后)
-        self._tool_pool: dict[str, ToolDef] = {}        # 工具名 → ToolDef (全量平铺)
+    def __init__(self):
         self._role_tools: dict[str, set[str]] = {}      # role_id → {已添加的工具名}
-        self._loaded = False
-
-    # ── 加载 ──────────────────────────────────────────────
-
-    def _ensure_loader(self) -> Any:
-        """惰性创建 MCPToolLoader 实例."""
-        if self._loader is None:
-            from src.python_tools.mcp_toolkit import MCPToolLoader
-            self._loader = MCPToolLoader(rules_file=str(self.rules_file),
-                                         server_args=self.server_args)
-        return self._loader
-
-    def ensure_loaded(self) -> dict[str, ToolKit]:
-        """加载全部配置的 MCP 服务器工具并平铺到工具池. 幂等, 可重复调用.
-
-        返回:
-            分组后的 {组名: ToolKit}.
-        """
-        if self._loaded:
-            return self._toolkit_groups
-        loader = self._ensure_loader()
-        self._toolkit_groups = loader.load()
-        self._tool_pool.clear()
-        for gname, tk in self._toolkit_groups.items():
-            for td in tk:
-                self._tool_pool[td.name] = td
-        self._loaded = True
-        logger.info("MCPManager: 已加载 %d 个 MCP 工具 (来自 %d 组)",
-                    len(self._tool_pool), len(self._toolkit_groups))
-        return self._toolkit_groups
-
-    def close(self) -> None:
-        """关闭全部 MCP 服务器连接 (进程退出时调用)."""
-        if self._loader is not None:
-            try:
-                self._loader.close()
-            except Exception:
-                logger.exception("MCPManager: 关闭服务器连接失败")
-        self._loaded = False
-
-    # ── 查询 ──────────────────────────────────────────────
-
-    def list_available(self) -> list[dict[str, str]]:
-        """列出工具池中全部可用 MCP 工具 (名称 + 简述 + 来源组)."""
-        self.ensure_loaded()
-        result = []
-        for name, td in sorted(self._tool_pool.items()):
-            result.append({
-                "name": name,
-                "description": (td.description or "")[:120],
-                "source": td.source,
-            })
-        return result
-
-    def search_tools(self, keyword: str) -> list[dict[str, str]]:
-        """按关键词搜索本地已有的 MCP 工具 (匹配名称或描述).
-
-        参数:
-            keyword: 搜索词, 如 "file" / "git" / "issue".
-
-        返回:
-            匹配的工具列表 [{name, description, source}].
-        """
-        self.ensure_loaded()
-        kw = (keyword or "").strip().lower()
-        if not kw:
-            return []
-        hits = []
-        for name, td in sorted(self._tool_pool.items()):
-            haystack = f"{name} {td.description or ''}".lower()
-            if kw in haystack:
-                hits.append({
-                    "name": name,
-                    "description": (td.description or "")[:120],
-                    "source": td.source,
-                })
-        return hits
 
     # ── 角色工具管理 ──────────────────────────────────────
 
@@ -266,17 +164,18 @@ class MCPManager:
         """列出角色电脑上已安装的 MCP 工具."""
         computer = role.computer
         return [
-            {"name": n, "description": (self._tool_pool[n].description or "")[:120]}
-            for n in computer.list_installed_mcp_tools() if n in self._tool_pool
+            {"name": n, "description": (computer._mcp_tools[n].description or "")[:120]}
+            for n in computer.list_installed_mcp_tools() if n in computer._mcp_tools
         ]
 
     # ── 角色工具包 (MCP 工具集合, 按组) ──────────────────
 
     def role_toolkit(self, role: Any) -> ToolKit:
-        """将角色已添加的 MCP 工具打包成一个 ToolKit (供 get_tools_prompt 展示)."""
+        """将角色已添加的 MCP 工具打包成一个 ToolKit (供提示词/汇总展示)."""
         tk = ToolKit(name=f"mcp[{role.role_id}]", description="该角色已启用的 MCP 工具")
+        computer = role.computer
         for n in sorted(self._role_tools.get(role.role_id, set())):
-            td = self._tool_pool.get(n)
+            td = computer._mcp_tools.get(n)
             if td is not None:
                 tk._tools[n] = td
         return tk
@@ -305,24 +204,35 @@ def create_mcp_manager_toolkit(manager: MCPManager) -> ToolKit:
         return r
 
     def _mcp_search(args: dict[str, Any]) -> str:
-        """搜索本地可用的 MCP 工具."""
-        kw = args.get("keyword", "").strip()
+        """搜索当前角色电脑 MCP 服务器上可用的工具."""
+        kw = args.get("keyword", "").strip().lower()
         if not kw:
             return "请提供 keyword 搜索词."
-        hits = manager.search_tools(kw)
+        computer = _role().computer
+        hits = [
+            {"name": n, "description": (td.description or "")}
+            for n, td in sorted(computer._mcp_tools.items())
+            if kw in n.lower() or kw in (td.description or "").lower()
+        ]
         if not hits:
-            return f"没有匹配 '{kw}' 的 MCP 工具. 可用 mcp_list 查看全部."
+            return (f"没有匹配 '{kw}' 的 MCP 工具. "
+                    f"本电脑服务器已装: {computer.list_installed_mcp_tools() or '(无)'}. "
+                    f"可用 mcp_list 查看全部.")
         lines = [f"搜索 '{kw}' 找到 {len(hits)} 个工具:"]
         for h in hits:
             lines.append(f"- {h['name']}: {h['description']}")
         return "\n".join(lines)
 
     def _mcp_list(args: dict[str, Any]) -> str:
-        """列出全部可用的本地 MCP 工具."""
-        avail = manager.list_available()
+        """列出当前角色电脑 MCP 服务器上全部可用工具."""
+        computer = _role().computer
+        avail = [
+            {"name": n, "description": (td.description or "")}
+            for n, td in sorted(computer._mcp_tools.items())
+        ]
         if not avail:
-            return "暂无可用 MCP 工具 (服务器可能未连接)."
-        lines = [f"本地共有 {len(avail)} 个 MCP 工具:"]
+            return "本电脑暂无 MCP 服务器工具 (服务器可能未连接)."
+        lines = [f"本电脑 MCP 服务器共有 {len(avail)} 个工具:"]
         for a in avail:
             lines.append(f"- {a['name']}: {a['description']}")
         return "\n".join(lines)

@@ -7,7 +7,7 @@
   - delete_task: 删除任务
 
 时间单位是 Tick, 范围 0~60 (一天内, 0 = 上班, 60 = 下班).
-任务注册到共享 TimeManager, 到达指定 Tick 时通过事件总线
+任务注册到共享 TimeEventBus, 到达指定 Tick 时通过事件总线
 定向提醒创建该任务的角色 (其他角色不会收到).
 
 用法:
@@ -33,7 +33,7 @@ def _persist_task(role: Any, task: Any) -> None:
 
     参数:
         role: AgentRole (提供 computer).
-        task: TimeManager 返回的 Task 对象.
+        task: TimeEventBus 返回的 Task 对象.
     """
     try:
         comp = role.computer
@@ -232,6 +232,6 @@ def bind_role_to_toolkit(toolkit: ToolKit, role: Any) -> None:
 
     参数:
         toolkit: 任务工具类实例
-        role:    AgentRole 实例 (提供 role_id 与共享 TimeManager)
+        role:    AgentRole 实例 (提供 role_id 与共享 TimeEventBus)
     """
     toolkit._role_holder["role"] = role  # type: ignore[attr-defined]

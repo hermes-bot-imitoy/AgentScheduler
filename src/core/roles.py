@@ -95,7 +95,7 @@ class AgentRole:
     _tools: Any = field(default=None, repr=False, init=False)  # ToolRegistry, lazy init
     _pool: Any = field(default=None, repr=False, init=False)   # RolePool back-reference for talk
     _note_store: Any = field(default=None, repr=False, init=False)  # NoteStore, lazy init
-    _time_manager: Any = field(default=None, repr=False, init=False)  # TimeManager, lazy init
+    _time_manager: Any = field(default=None, repr=False, init=False)  # TimeEventBus, lazy init
     _computer: Any = field(default=None, repr=False, init=False)  # Computer, lazy init (角色添加时自动创建)
 
     # Callbacks
@@ -189,7 +189,7 @@ class AgentRole:
         if self.skills:
             parts.append(f"技能：{', '.join(self.skills)}。")
 
-        # 当前是第几天 (作息系统, 从共享 TimeManager 获取)
+        # 当前是第几天 (作息系统, 从共享 TimeEventBus 获取)
         parts.append(f"今天是第 {self.time_manager.day_number()} 天。")
 
         # 通用工作规则 (所有角色生效): 空闲即休息, 不主动打扰他人
@@ -311,15 +311,15 @@ class AgentRole:
         以 Tick 为单位: 1 Tick = 10 分钟, 系统启动 = Tick 0 / 第 1 天.
         """
         if self._time_manager is None:
-            from src.core.time_manager import TimeManager
-            self._time_manager = TimeManager()
+            from src.core.time_manager import TimeEventBus
+            self._time_manager = TimeEventBus()
         return self._time_manager
 
     def bind_time_manager(self, tm: Any) -> None:
-        """绑定共享 TimeManager (所有角色共用同一个时间源).
+        """绑定共享 TimeEventBus (所有角色共用同一个时间源).
 
         参数:
-            tm: TimeManager 实例.
+            tm: TimeEventBus 实例.
         """
         self._time_manager = tm
 
@@ -354,12 +354,12 @@ class AgentRole:
             from src.python_tools.memory_toolkit import bind_store_to_toolkit
             bind_store_to_toolkit(toolkit, self.note_store, role=self)
 
-        # 时间工具类自动绑定该角色的 TimeManager (作息时间) + 角色 (休息状态)
+        # 时间工具类自动绑定该角色的 TimeEventBus (作息时间) + 角色 (休息状态)
         if toolkit.name == "time":
             from src.python_tools.time_toolkit import bind_time_to_toolkit
             bind_time_to_toolkit(toolkit, self.time_manager, role=self)
 
-        # 定时任务工具类自动绑定该角色 (任务注册到共享 TimeManager)
+        # 定时任务工具类自动绑定该角色 (任务注册到共享 TimeEventBus)
         if toolkit.name == "task":
             from src.python_tools.task_toolkit import bind_role_to_toolkit
             bind_role_to_toolkit(toolkit, self)
@@ -433,17 +433,8 @@ class AgentRole:
         if self._tools is not None:
             openai_tools = self._tools.to_openai_tools()
 
-        # 原生 function calling: 工具由 API 声明, 不再注入文本协议提示词.
-        # 提示词中保留使用规则 (防无限探索) — 来自 get_tools_prompt 的 Rules 部分.
-        full_system = system
-        if self._tools is not None and self._tools.tool_count > 0:
-            rules = self._tools.get_tools_prompt()
-            # 只取 Rules 段 (文本协议示例对原生模式无意义, 反而误导)
-            rules_part = rules.split("Rules:")[-1]
-            full_system += "\n\nRules:" + rules_part
-
         messages: list[dict] = [
-            {"role": "system", "content": full_system},
+            {"role": "system", "content": system},
             {"role": "user", "content": task.description},
         ]
 
@@ -510,55 +501,6 @@ class AgentRole:
 
             logger.debug("[%s] 工具循环: 第 %d 轮仍包含工具调用, 继续下一轮 (无轮次上限)",
                          self.role_id, round_no)
-
-    @staticmethod
-    def _parse_tool_calls(response: str) -> list[tuple[str, dict[str, Any]]]:
-        """Extract ALL tool_call blocks from LLM response.
-
-        标准格式 (平铺顶层, LLM 最擅长):
-          ```tool_call
-          {"tool": "write_note", "title": "...", "content": "..."}
-          ```
-        兼容包装格式 (arguments / args 为对象时优先使用):
-          {"tool": "write_note", "arguments": {...}}
-          {"tool": "write_note", "args": {...}}
-        一个回复可包含多个 tool_call 块, 全部返回.
-
-        返回:
-            [(tool_name, args_dict), ...] 列表, 无有效调用返回 [].
-        """
-        blocks = re.findall(r'```tool_call\s*\n(.*?)\n\s*```', response, re.DOTALL)
-        calls: list[tuple[str, dict[str, Any]]] = []
-        for block in blocks:
-            try:
-                data = json.loads(block.strip())
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(data, dict):
-                continue
-            tool_name = data.get("tool")
-            if not isinstance(tool_name, str) or not tool_name:
-                continue
-            # 包装格式兼容: arguments / args 为对象时优先使用
-            for wrapper in ("arguments", "args"):
-                wrapped = data.get(wrapper)
-                if isinstance(wrapped, dict):
-                    calls.append((tool_name, wrapped))
-                    break
-            else:
-                # 标准平铺格式: 去掉保留键后的其余字段作为参数
-                flat_args = {k: v for k, v in data.items()
-                             if k not in ("tool", "arguments", "args")}
-                calls.append((tool_name, flat_args))
-        return calls
-
-    @staticmethod
-    def _parse_tool_call(response: str) -> tuple[Optional[str], dict[str, Any]]:
-        """兼容旧接口: 只取第一个 tool_call 块."""
-        calls = AgentRole._parse_tool_calls(response)
-        if not calls:
-            return None, {}
-        return calls[0]
 
 
 # ── RolePool ───────────────────────────────────────────────
