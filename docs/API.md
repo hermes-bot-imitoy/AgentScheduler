@@ -1,6 +1,6 @@
 # MAF Scheduler 接口文档
 
-基于 Microsoft Agent Framework 理念的 **企业作息与事件驱动 Agent 调度框架**。
+**多角色、事件驱动、Tick 作息制的 Agent 调度框架**（Shift & Event-Driven Agent Scheduler）。
 本文档覆盖全部核心类、工具类、工作流的接口、用途、参数与使用示例。
 
 ---
@@ -29,7 +29,7 @@
 ```
 ┌─────────────────────────────────────────────┐
 │ AgentSystem (统一入口)                       │
-│  ├── TimeManager      (独占线程, Tick 制)    │
+│  ├── TimeEventBus   (独占线程, Tick 制)      │
 │  ├── RolePool         (每角色独立线程)       │
 │  └── EventDispatcher  (事件广播/定向投递)    │
 └──────────────┬──────────────────────────────┘
@@ -102,7 +102,7 @@ Event(
 文件: `src/core/time_manager.py`
 
 ### `ScheduledTask`（dataclass）
-定时任务，注册到 TimeManager。
+定时任务，注册到 TimeEventBus。
 
 | 字段 | 说明 |
 |------|------|
@@ -115,15 +115,16 @@ Event(
 
 方法: `absolute_fire_tick(ticks_per_day)` → `(day-1)*144 + target_tick`
 
-### `TimeManager`
-作息时间管理器，**独占一个后台线程**。
+### `TimeEventBus`
+作息时间管理器（= 事件总线子类，`EventBus` + 时间线程），**独占一个后台线程**。
+（旧名 `TimeManager` 兼容别名已于 2026-08 移除，统一用 `TimeEventBus`。）
 
 **常量**: `MINUTES_PER_TICK=10`、`TICKS_PER_DAY=144`、`SHIFT_START_TICK=0`、`SHIFT_END_TICK=60`、`EVENT_SHIFT_START/SHIFT_END/TASK_DUE`、`TASK_TICK_MIN/MAX=0/60`
 
 **构造**:
 ```python
-TimeManager(minutes_per_tick=10, shift_start_tick=0, shift_end_tick=60,
-            ticks_per_day=144, check_interval=30)
+TimeEventBus(minutes_per_tick=10, shift_start_tick=0, shift_end_tick=60,
+             ticks_per_day=144, check_interval=30)
 ```
 
 **配置**:
@@ -157,12 +158,12 @@ TimeManager(minutes_per_tick=10, shift_start_tick=0, shift_end_tick=60,
 **自动事件**: 每天第 0 Tick → `SHIFT_START`（EMERGENCY）；每天 ≥60 Tick → `SHIFT_END`（EMERGENCY，instruction 提示调 summary）；到期任务 → `TASK_DUE`（NORMAL，`target_role=owner`）。
 
 ```python
-from src.core.time_manager import TimeManager
-tm = TimeManager(check_interval=1)
+from src.core.time_manager import TimeEventBus
+tm = TimeEventBus(check_interval=1)
 tm.set_event_sender(lambda ev: dispatcher.trigger(ev))  # 接入总线
 tm.start()
 print(tm.describe())          # 第 1 天, Tick 0 (上班中...)
-task = tm.schedule_task("写周报", owner_role="ceo", target_tick=45)
+task = tm.schedule_task("写周报", owner_role="CEO", target_tick=45)
 tm.cancel_task(task.task_id)
 tm.stop()
 ```
@@ -310,7 +311,7 @@ results = dispatcher.trigger(Event(source="github", event_type="new_pr",
 AgentSystem(roles=None, role_ids=None, check_interval=30, auto_toolkits=True)
 ```
 - `roles`：预构建 AgentRole 列表；`role_ids`：模板 id 列表
-- `auto_toolkits=True`：自动注册 memory/time/task 工具 + 绑定共享 TimeManager
+- `auto_toolkits=True`：自动注册 memory/time/task 工具 + 绑定共享 TimeEventBus
 
 | 方法/属性 | 说明 |
 |-----------|------|

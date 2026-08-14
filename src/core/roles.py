@@ -30,6 +30,20 @@ from src.core.types import AgentState, Event, Priority
 logger = logging.getLogger(__name__)
 
 
+# ── 工具调用循环上限 ───────────────────────────────────────
+# 防止 LLM 陷入"反复调工具/解析失败重来"的退化循环: 无限轮次 + 无输出上限
+# 会无限烧 Token. 超限时抛 ToolLoopError → 任务标记 failed, 错误文本不当结果.
+MAX_TOOL_ROUNDS = 20              # 最多工具调用轮数
+MAX_TOOL_TOTAL_TOKENS = 200_000   # 单任务累计 Token 上限 (含 thinking 推理 token)
+
+# LLM 调用失败时的错误文本标记 (llm.py 超时/异常时返回这些前缀)
+LLM_ERROR_MARKERS = ("[API timeout]", "[API error:")
+
+
+class ToolLoopError(RuntimeError):
+    """工具调用循环超限或 LLM 调用失败. 任务应标记 failed, 错误文本不作为成功结果."""
+
+
 # ── Urgency ────────────────────────────────────────────────
 
 class Urgency(IntEnum):
@@ -439,12 +453,18 @@ class AgentRole:
         ]
 
         total_tokens = 0
-        round_no = 0  # 工具调用轮次计数 (仅用于 DEBUG 日志, 不限制循环)
+        round_no = 0  # 工具调用轮次计数
 
-        # 工具调用循环: 无限轮次, 直到 LLM 返回无 tool_calls 的终答.
-        # 无上限截断 — LLM 每轮必须调工具才会继续, 迟早给出终答.
+        # 工具调用循环: 有轮次上限与累计 Token 上限, 超限即失败.
+        # 无上限时 LLM 一旦陷入反复调工具的退化循环会无限烧 Token.
         while True:
             round_no += 1
+
+            # 轮次上限: 超限终止循环并标记失败 (防止无限循环)
+            if round_no > MAX_TOOL_ROUNDS:
+                raise ToolLoopError(
+                    f"工具调用超过 {MAX_TOOL_ROUNDS} 轮仍未收敛 "
+                    f"(累计 {total_tokens} tokens), 任务失败")
 
             content, raw_calls, usage = self._llm.chat_with_tools(
                 messages, openai_tools, 0.7, None,  # max_tokens=None = 无上限 (长内容不截断)
@@ -452,10 +472,21 @@ class AgentRole:
             round_tokens = usage.get("total_tokens", 0) if usage else 0
             total_tokens += round_tokens
 
+            # 累计 Token 上限: 超限同样终止 (LLM 退化循环时会持续烧 token)
+            if total_tokens > MAX_TOOL_TOTAL_TOKENS:
+                raise ToolLoopError(
+                    f"工具调用累计 {total_tokens} tokens 超过上限 "
+                    f"{MAX_TOOL_TOTAL_TOKENS}, 任务失败")
+
             # 原生结构化判定: tool_calls 非空 = 本轮在调工具
             tool_calls = raw_calls or []
 
             if not tool_calls:
+                # LLM 调用失败 (API 超时/异常返回 "[API ...]" 错误文本):
+                # 这不是正常终答, 不能当作成功结果 — 标记失败并抛出
+                if content and content.startswith(LLM_ERROR_MARKERS):
+                    raise ToolLoopError(
+                        f"LLM 调用失败 (第 {round_no} 轮): {content[:120]}")
                 # Final response — no tool call
                 logger.debug("[%s] 工具循环: 第 %d 轮收到终答 (无工具调用), 任务完成",
                              self.role_id, round_no)
@@ -499,8 +530,9 @@ class AgentRole:
                     "content": tool_result,
                 })
 
-            logger.debug("[%s] 工具循环: 第 %d 轮仍包含工具调用, 继续下一轮 (无轮次上限)",
-                         self.role_id, round_no)
+            logger.debug("[%s] 工具循环: 第 %d 轮仍包含工具调用, 继续下一轮 "
+                         "(上限 %d 轮 / %d tokens)",
+                         self.role_id, round_no, MAX_TOOL_ROUNDS, MAX_TOOL_TOTAL_TOKENS)
 
 
 # ── RolePool ───────────────────────────────────────────────
@@ -526,13 +558,17 @@ class RolePool:
         pool.shutdown()
     """
 
-    def __init__(self, llm_api_key: Optional[str] = None, llm_model: Optional[str] = None):
+    def __init__(self, llm_api_key: Optional[str] = None, llm_model: Optional[str] = None,
+                 time_manager: Any = None):
         self._roles: dict[str, AgentRole] = {}
         self._executor = ThreadPoolExecutor(thread_name_prefix="role-")
         self._futures: dict[str, Future] = {}
         self._shutdown_flag = threading.Event()
         self._llm_api_key = llm_api_key
         self._llm_model = llm_model
+        # 共享时间源 (AgentSystem 注入). 招聘入职 (add_role_and_start) 时
+        # 绑定给新角色, 否则新员工拿到的是私有未启动的 TimeEventBus (永远第 1 天).
+        self._time_manager = time_manager
 
     # ── Role management ────────────────────────────────────
 
@@ -560,6 +596,13 @@ class RolePool:
         if role.role_id in self._roles:
             raise ValueError(f"Role '{role.role_id}' already exists")
         self._roles[role.role_id] = role
+
+        # 绑定共享时间源 (High-1 修复): 新入职角色必须与团队共用同一个
+        # TimeEventBus, 否则 add_toolkit(time) 会让 time 工具持有角色私有的
+        # 未启动实例 — get_time 永远第 1 天 Tick 0, 定时任务永不触发.
+        # 必须在装配工具之前绑定.
+        if self._time_manager is not None:
+            role.bind_time_manager(self._time_manager)
 
         # 装配默认工具 (与 AgentSystem 的 auto_toolkits 一致)
         from src.python_tools import DEFAULT_TOOLKITS
@@ -630,6 +673,9 @@ class RolePool:
     def start(self) -> None:
         """Launch all role worker threads."""
         for role_id, role in self._roles.items():
+            # 共享时间源存在时同样绑定 (独立使用 RolePool + start 的场景)
+            if self._time_manager is not None:
+                role.bind_time_manager(self._time_manager)
             role._running = True
             role._pool = self  # back-reference for talk tool
             role._llm = DeepSeekLLM(api_key=self._llm_api_key, model=self._llm_model,
@@ -703,6 +749,10 @@ class RolePool:
                         user=task.description,
                         max_tokens=512,
                     )
+                    # LLM 调用失败 (API 超时/异常): 错误文本不是正常答复, 标记失败
+                    if result_text.startswith(LLM_ERROR_MARKERS):
+                        raise ToolLoopError(
+                            f"LLM 调用失败: {result_text[:120]}")
                 task.result = result_text
                 task.tokens_consumed = tokens
                 task.status = "done"

@@ -44,8 +44,13 @@ class NoteStore:
 
     @staticmethod
     def _sanitize_title(title: str) -> str:
-        """清洗标题为合法文件名. 非法字符替换为下划线."""
-        cleaned = re.sub(r'[\\/:*?"<>|#%\s]+', "_", title.strip())
+        """清洗标题为合法文件名. 非法字符替换为下划线.
+
+        除常规文件名非法字符外, 还替换 shell 元字符 (单引号/反引号/$/分号/&):
+        标题会拼进电脑端 shell 命令, 不转义可被 LLM 注入任意命令 (High-3).
+        """
+        # 非 raw 字符串: \\s 是正则空白, \u0060 是反引号, \\\\ 是反斜杠
+        cleaned = re.sub("[\\\\/:*?\"<>|#%\\s'\u0060$;&]+", "_", title.strip())
         return cleaned or "untitled"
 
     @property
@@ -66,7 +71,12 @@ class NoteStore:
 
     def _write(self, path: str, content: str) -> None:
         if self._computer is not None:
-            self._computer.write_file(path, content)
+            result = self._computer.write_file(path, content)
+            # Medium-6 修复: 电脑写入失败 (电脑未开机/命令失败) 必须显式抛出,
+            # 否则上层会向 LLM 谎报"已保存"而数据实际没落盘
+            if isinstance(result, str) and (result.startswith("错误:")
+                                            or result.startswith("[exit ")):
+                raise IOError(f"电脑写入失败: {result}")
         else:
             p = Path(path)
             p.parent.mkdir(parents=True, exist_ok=True)
@@ -156,13 +166,21 @@ class NoteStore:
         return self._read(path)
 
     def delete_note(self, title: str) -> bool:
-        """删除笔记. 返回是否删除成功."""
+        """删除笔记 (真实删除文件). 返回是否删除成功."""
         path = self._note_path(title)
-        if self._read(path) is not None:
-            self._write(path, "")  # 无删除接口, 置空文件
-            logger.info("[%s] 笔记已删除: %s", self.role_id, Path(path).name)
-            return True
-        return False
+        if self._read(path) is None:
+            return False
+        if self._computer is not None:
+            result = self._computer.delete_file(path)
+            if isinstance(result, str) and result.startswith("错误:"):
+                logger.warning("[%s] 删除笔记失败: %s", self.role_id, result)
+                return False
+        else:
+            p = Path(path)
+            if p.exists():
+                p.unlink()
+        logger.info("[%s] 笔记已删除: %s", self.role_id, Path(path).name)
+        return True
 
     # ── 每日总结 (作息系统, 按天序号存储) ─────────────────
 

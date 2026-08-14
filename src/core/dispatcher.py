@@ -13,7 +13,7 @@ import logging
 from typing import Any
 
 from src.core.roles import AgentRole, RolePool, Task
-from src.core.types import Event, FilterDecision, Priority
+from src.core.types import AgentState, Event, FilterDecision, Priority
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +67,12 @@ class EventDispatcher:
 
         # 定向事件: 只投递给 target_role, 其他角色跳过
         if event.target_role is not None:
+            # 目标角色不存在: 不能静默丢弃, 打警告并返回 (其余角色已标记跳过)
+            if event.target_role not in self._pool._roles:
+                logger.warning(
+                    "EventDispatcher: 定向事件目标角色 '%s' 不存在, 事件丢弃 "
+                    "(id=%s type=%s)", event.target_role, event.id, event.event_type)
+                return results
             for role_name in self._pool._roles:
                 if role_name == event.target_role:
                     continue
@@ -83,6 +89,20 @@ class EventDispatcher:
             if event.target_role is not None:
                 if role_name != event.target_role:
                     continue
+                # 已下班 (OFF_DUTY/WRAPPING_UP) 的角色不被非紧急定向事件打扰:
+                # 强制入队会让 worker 在下班时间处理提醒
+                if event.priority < Priority.EMERGENCY and role.state in (
+                        AgentState.OFF_DUTY, AgentState.WRAPPING_UP):
+                    self.stats["roles_skipped"] += 1
+                    logger.info(
+                        "  → [%s] SKIPPED: 角色已%s, 非紧急定向事件不打扰",
+                        role_name, role.state.value)
+                    results[role_name] = {
+                        "accepted": False,
+                        "reason": f"角色已{role.state.value}, 非紧急定向事件不打扰",
+                        "task_id": None,
+                    }
+                    continue
                 accepted, reason = True, f"定向任务提醒 (target_role={role_name})"
             else:
                 self.stats["roles_notified"] += 1
@@ -97,7 +117,7 @@ class EventDispatcher:
                 self.stats["total_tasks_created"] += 1
                 logger.info(
                     "  → [%s] ACCEPTED: %s → Task %s (urgency=%s)",
-                    role_name, reason, task_id, task.urgency,
+                    role_name, reason, task_id, abs(task.urgency),
                 )
             else:
                 self.stats["roles_skipped"] += 1

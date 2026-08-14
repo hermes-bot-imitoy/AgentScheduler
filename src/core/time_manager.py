@@ -116,7 +116,7 @@ class TimeEventBus(EventBus):
     shift_start_tick: int = SHIFT_START_TICK
     shift_end_tick: int = SHIFT_END_TICK
     ticks_per_day: int = TICKS_PER_DAY
-    check_interval: int = DEFAULT_CHECK_INTERVAL
+    check_interval: float = DEFAULT_CHECK_INTERVAL  # 支持小数秒 (测试用短间隔加速)
 
     # 内部状态
     _start_dt: Optional[datetime] = field(default=None, repr=False, init=False)  # 启动时刻
@@ -573,18 +573,26 @@ class TimeEventBus(EventBus):
         task = self._tasks.get(task_id)
         if task is None:
             return None
+        # 先校验新值, 再应用 (校验失败不产生副作用)
+        new_day = task.day if day is None else day
+        new_tick = task.target_tick if target_tick is None else target_tick
+        if not (TASK_TICK_MIN <= new_tick <= TASK_TICK_MAX):
+            raise ValueError(
+                f"target_tick 必须在 {TASK_TICK_MIN}~{TASK_TICK_MAX} 范围内, 得到 {new_tick}"
+            )
+        # 防呆: 不能把任务改到已过去的时间 — 过期绝对 tick 会被立即触发
+        # (当前绝对 tick 由派生时钟算出, 改到过去 = 编辑后瞬间到期)
+        if (new_day - 1) * self.ticks_per_day + new_tick < self.current_tick():
+            raise ValueError(
+                f"不能把任务 [ID={task_id}] 改到过去的时间: "
+                f"第 {new_day} 天 Tick {new_tick} 已过期 (当前绝对 Tick {self.current_tick()})"
+            )
         # 编辑前取消旧的事件注册 (若已注册)
         self._cancel_task_event(task_id)
         if description is not None:
             task.description = description
-        if target_tick is not None:
-            if not (TASK_TICK_MIN <= target_tick <= TASK_TICK_MAX):
-                raise ValueError(
-                    f"target_tick 必须在 {TASK_TICK_MIN}~{TASK_TICK_MAX} 范围内, 得到 {target_tick}"
-                )
-            task.target_tick = target_tick
-        if day is not None:
-            task.day = day
+        task.target_tick = new_tick
+        task.day = new_day
         # 编辑后重新注册 (当天任务) — 隔天任务仅保存, 上班时自动加载
         self._register_task_event_if_today(task)
         logger.info("TimeEventBus: 定时任务已编辑 [%s] → tick %d (day %d)", task_id, task.target_tick, task.day)

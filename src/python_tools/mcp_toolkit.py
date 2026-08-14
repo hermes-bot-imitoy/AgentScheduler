@@ -134,6 +134,23 @@ class MCPServer:
         if self._thread:
             self._thread.join(timeout=2)
 
+    def is_alive(self, timeout: float = 5.0) -> bool:
+        """探测服务器会话是否仍然可用 (进程死亡/管道断裂后返回 False).
+
+        用于电脑开机时的跨天重连检测: 容器 stop 会杀死 stdio 管道,
+        但会话对象可能仍在, 只有实际往返一次才能确认. 走轻量 list_tools.
+        """
+        if self._session is None or self._loop is None:
+            return False
+        try:
+            future = asyncio.run_coroutine_threadsafe(
+                self._session.list_tools(), self._loop,
+            )
+            future.result(timeout=timeout)
+            return True
+        except Exception:
+            return False
+
     # ── 工具操作 ──────────────────────────────────────────
 
     def list_tools(self) -> list[Any]:

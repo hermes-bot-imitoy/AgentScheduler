@@ -18,7 +18,7 @@
 ```
 ┌──────────────────────────────────────────────────────────┐
 │        TimeEventBus (时间 × 事件 深度绑定)                │
-│   TimeManager 并入 EventBus:                              │
+│   (2026-08 起 TimeManager 已并入 EventBus, 统一此名)      │
 │   - 时钟/Tick/天 (1 Tick = 10 分钟, 上班 0~60 Tick)       │
 │   - 3 层过滤管线 (状态掩码 → 显著性 → 唤醒)               │
 │   - 事件调度表: register_event(ev, tick) 定时触发          │
@@ -62,7 +62,7 @@
   - `tick=N` → 存入事件调度表，时间线程到点自动投递
 - 作息事件自动触发：每天 Tick 0 → `SHIFT_START`（上班），Tick 60 → `SHIFT_END`（下班）
 - 定时任务：`schedule_task` 只保存任务列表；当天任务直接注册事件，隔天任务目标天上班时自动加载
-- 兼容别名 `TimeManager = TimeEventBus`，旧引用不破坏
+- 兼容别名 `TimeManager` 已于 2026-08 移除（commit `2953835`）——统一使用 `TimeEventBus`
 
 ### 2. 事件 3 层过滤 (`src/core/event_bus.py`)
 
@@ -92,9 +92,12 @@
 ### 5. 原生 function calling (`src/core/llm.py` + `src/core/roles.py`)
 
 - 请求带 `tools` 声明 + `tool_choice:"auto"`，判定靠响应 `message.tool_calls` 结构化字段
-- 工具结果以 `role:"tool"` + `tool_call_id` 回喂，循环无轮次上限
+- 工具结果以 `role:"tool"` + `tool_call_id` 回喂
+- 循环有保护上限：最多 20 轮工具调用 / 单任务累计 200K tokens，超限任务标记 failed
+  （防止 LLM 陷入反复调工具的退化循环无限烧 Token）；API 超时/错误文本
+  （`[API timeout]` / `[API error: ...]`）同样判失败，不当成功结果
 - `max_tokens` 默认无上限（长内容 JSON 不被截断成非法 JSON；`None` 时不传该字段）
-- 不再使用文本协议（```tool_call 块 + 正则），`_parse_tool_calls` 仅作兼容保留
+- 文本协议（```tool_call 块 + `_parse_tool_calls` 正则）已随 commit `2953835` 删除，只有原生 function calling
 
 ### 6. 个人电脑体系 (`src/core/computer.py`)
 
@@ -104,8 +107,11 @@
 - **上班自动开机**（SHIFT_START）、**下班自动关机**（summary 总结后）
 - 同一自定义桥接网络 `maf-net`：电脑间可互相通信（`lan_devices` 工具查人名/电脑名/IP）
 - `ComputerManager`（全局单例）管理分配/销毁
-- 降级：本机无 podman 时自动用 `LocalComputer`（`data/computers/<role>` 目录模拟）
+- **Podman 是硬要求**：本机无 podman 时 `PodmanComputer` 构造直接抛 `RuntimeError`
+  （commit `2953835` 移除了自动降级）——需要本地模拟请显式设 `computer_kind="local"`
 - 另有 `SSHComputer`（远程主机，需显式指定 host）
+- **跨天自动重连 MCP 服务器**：每天下班 `podman stop` 会杀死容器内 MCP 服务器的
+  stdio 管道，次日上班开机时自动探测会话存活并重建（否则第 2 天起文件工具全失效）
 
 ### 7. MCP 工具 — 服务器跑在角色电脑容器内
 
@@ -213,7 +219,7 @@ maf_scheduler/
 ### 前置条件
 
 - Python 3.10+，`pip install -r requirements.txt`（或使用项目自带 `.venv/`）
-- [podman](https://podman.io/)（每角色电脑的容器运行时；缺失时自动降级本地目录模拟，但强烈建议使用 podman 容器，本地目录没有测试，未来也不会使用本地目录作为运行时）
+- [podman](https://podman.io/)（每角色电脑的容器运行时，**必须安装**；本地模拟请显式使用 `computer_kind="local"`）
 - DeepSeek API Key（环境变量 `DEEPSEEK_API_KEY`）
 
 ```bash

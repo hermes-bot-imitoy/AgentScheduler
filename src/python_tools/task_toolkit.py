@@ -159,7 +159,7 @@ def create_task_toolkit() -> ToolKit:
             # 同步删除电脑上的任务文件
             try:
                 comp = role.computer
-                comp.write_file(f"{comp.workdir}/tasks/{task_id}.md", "")  # 置空
+                comp.delete_file(f"{comp.workdir}/tasks/{task_id}.md")
             except Exception:
                 logger.warning("任务文件清理失败 (不影响任务调度)", exc_info=True)
             return f"任务已删除: {task_id}"

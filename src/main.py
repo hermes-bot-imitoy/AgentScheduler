@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 import sys
 import time as time_module
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 # 支持 `python src/main.py` 直接启动: 把项目根目录加入 sys.path,
@@ -39,10 +40,12 @@ logging.basicConfig(level=logging.DEBUG, format="%(levelname)s %(name)s: %(messa
 for _noisy in ("requests", "urllib3", "httpcore", "httpx", "openai"):
     logging.getLogger(_noisy).setLevel(logging.WARNING)
 
-# 打印信息同步写入日志文件 (data/main_run.log), 控制台与文件各一份
+# 打印信息同步写入日志文件 (data/main_run.log), 控制台与文件各一份.
+# 轮转: 单文件最大 20MB, 保留 3 个备份 — 多日运行日志不会无限增长.
 LOG_FILE = PROJECT_ROOT / "data" / "main_run.log"
 LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-_file_handler = logging.FileHandler(LOG_FILE, encoding="utf-8")
+_file_handler = RotatingFileHandler(LOG_FILE, maxBytes=20 * 1024 * 1024,
+                                    backupCount=3, encoding="utf-8")
 _file_handler.setLevel(logging.DEBUG)
 _file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s",
                                              datefmt="%H:%M:%S"))
@@ -204,6 +207,14 @@ def run_one_day(system: AgentSystem, day: int, with_client_task: bool) -> None:
 
     for rid in ROLE_IDS:
         summary = system.get_role(rid).note_store.get_summary(day=day)
+        if summary is None:
+            # summary 工具保存后立即关机, 电脑回读路径失效 ("电脑未开机").
+            # 直接读宿主机挂载目录 (Podman 挂载 data/computers/<role>/notes,
+            # LocalComputer 的 workdir 也是同一路径), 关机也能读到.
+            host_summary = PROJECT_ROOT / "data" / "computers" / rid / "notes" \
+                / f"_summary_day_{day}.md"
+            if host_summary.exists():
+                summary = host_summary.read_text(encoding="utf-8")
         if summary:
             ok(f"[{rid}] 第{day}天总结已保存: {summary[:50]}...")
         else:

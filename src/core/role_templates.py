@@ -424,5 +424,10 @@ def get_template(name: str) -> AgentRole:
 
 
 def add_template(role: AgentRole) -> None:
-    """Register a new role template into the pool."""
-    TEMPLATES[role.role_id] = lambda: role
+    """Register a new role template into the pool.
+
+    工厂返回角色的独立副本 (dataclasses.replace): 内部可变状态 (_queue/_lock/
+    _computer 等 init=False 字段) 全部重建, 避免同模板二次获取复用同一实例.
+    """
+    from dataclasses import replace
+    TEMPLATES[role.role_id] = lambda r=role: replace(r)

@@ -27,6 +27,7 @@ create_computer() 工厂按角色 computer_kind 选择实现.
 from __future__ import annotations
 
 import logging
+import shlex
 import shutil
 import subprocess
 from abc import ABC, abstractmethod
@@ -58,6 +59,48 @@ class Computer(ABC):
         self._auto_mcp = auto_mcp          # 自动创建的电脑: 创建时自动安装 MCP 服务器
         self._mcp_tools: dict[str, Any] = {}  # 已安装到本电脑的 MCP 工具 (name → ToolDef)
         self._mcp_server: Any = None       # 本电脑独立的 MCP 服务器连接 (懒创建)
+        self._connect_error: Optional[str] = None  # 最近一次 MCP 连接失败原因 (诊断用)
+
+    # ── MCP 会话存活检测与重连 ───────────────────────────
+
+    def _mcp_server_alive(self) -> bool:
+        """MCP 服务器会话是否存活.
+
+        返回 False = 会话已死 (如 podman stop 杀掉 stdio 管道), 需要重建.
+        无服务器实例视为存活 (无需重连). 探测走一次轻量 list_tools 往返,
+        因为会话对象在进程死后可能仍在 (仅查 _session 不可靠).
+        """
+        srv = self._mcp_server
+        if srv is None:
+            return True
+        probe = getattr(srv, "is_alive", None)
+        if probe is not None:
+            try:
+                return bool(probe())
+            except Exception:
+                return False
+        return getattr(srv, "_session", None) is not None
+
+    def _reconnect_mcp_server(self) -> None:
+        """MCP 服务器会话失效时重建 (跨天关机后 podman stop 杀死 stdio 管道).
+
+        旧服务器对象持有死管道, 幂等短路 (install_mcp_server 见 _mcp_server
+        非 None 就返回) 会让第 2 天起所有 MCP 文件工具永久失败 — 必须先
+        close + 置 None + 清空旧工具表, 再重新安装.
+        """
+        if self._mcp_server is None or self._mcp_server_alive():
+            return
+        logger.warning("电脑[%s] MCP 服务器会话已失效, 正在重建...", self.role_id)
+        try:
+            self._mcp_server.close()
+        except Exception:
+            pass
+        self._mcp_server = None
+        self._mcp_tools.clear()  # 旧 handler 绑定的是已死服务器
+        try:
+            self.install_mcp_server()
+        except Exception:
+            logger.exception("电脑[%s] MCP 服务器重建失败", self.role_id)
 
     # ── 抽象接口 (子类实现) ──────────────────────────────
 
@@ -84,6 +127,10 @@ class Computer(ABC):
     @abstractmethod
     def list_dir(self, path: str = "") -> str:
         """列出个人电脑指定目录内容 (默认工作目录)."""
+
+    @abstractmethod
+    def delete_file(self, path: str) -> str:
+        """删除个人电脑上的文件. 返回状态说明 (成功/错误)."""
 
     # ── MCP 工具安装与执行 (所有实现共用) ────────────────
 
@@ -150,6 +197,9 @@ class Computer(ABC):
                         self.role_id, len(self._mcp_tools),
                         self.list_installed_mcp_tools())
         except Exception as exc:
+            # 记录连接失败原因供诊断 (install_mcp_server 幂等短路,
+            # 失败后 _mcp_server 仍为 None, 下次调用可重试)
+            self._connect_error = str(exc)
             logger.exception("电脑[%s] MCP 服务器安装失败", self.role_id)
             return []
         return self.list_installed_mcp_tools()
@@ -298,6 +348,13 @@ class LocalComputer(Computer):
         entries = sorted(x.name for x in p.iterdir())
         return "\n".join(entries) if entries else "(空目录)"
 
+    def delete_file(self, path: str) -> str:
+        p = self._resolve(path)
+        if not p.exists():
+            return f"文件不存在: {p}"
+        p.unlink()
+        return f"已删除: {p}"
+
 
 # ── PodmanComputer (podman 容器虚拟电脑, 默认) ────────────
 
@@ -318,6 +375,7 @@ class PodmanComputer(Computer):
         super().__init__(role_id, auto_mcp=auto_mcp)
         self.image = image
         self.container_name = f"maf-{role_id or 'shared'}"
+        self._mcp_pkg_installed = False  # 容器内是否已预装 MCP 包 (真实属性)
         if shutil.which("podman") is None:
             raise RuntimeError(
                 f"Podman 未安装, 无法创建角色 {role_id} 的电脑容器 "
@@ -400,6 +458,7 @@ class PodmanComputer(Computer):
                         self.role_id, len(self._mcp_tools),
                         self.list_installed_mcp_tools())
         except Exception as exc:
+            self._connect_error = str(exc)  # 记录失败原因 (诊断用, 下次可重试)
             logger.exception("电脑[%s] 容器内 MCP 服务器安装失败", self.role_id)
             return []
         return self.list_installed_mcp_tools()
@@ -411,7 +470,11 @@ class PodmanComputer(Computer):
         )
 
     def _ensure_container(self) -> None:
-        """确保容器存在并运行 (不存在则创建), 并创建工作目录."""
+        """确保容器存在并运行 (不存在则创建), 并创建工作目录.
+
+        每个 podman 调用都检查 returncode — 失败立即抛错, 不再静默
+        吞掉 (否则系统照常运行, 笔记/总结实际没落盘却谎报已保存).
+        """
         # 容器挂载宿主机目录: data/computers/<role> ↔ 容器内 /home/agent
         host_dir = self.host_dir
         Path(host_dir).mkdir(parents=True, exist_ok=True)
@@ -420,38 +483,49 @@ class PodmanComputer(Computer):
             # 加入自定义桥接网络 (电脑间互通), 网络不存在则先创建
             from src.core.computer import _COMPUTER_MANAGER
             network = _COMPUTER_MANAGER.ensure_network()
-            self._pod("run", "-d", "--name", self.container_name,
-                      "--network", network,
-                      "-v", f"{host_dir}:{self.workdir}",
-                      self.image, "sleep", "infinity")
+            r = self._pod("run", "-d", "--name", self.container_name,
+                          "--network", network,
+                          "-v", f"{host_dir}:{self.workdir}",
+                          self.image, "sleep", "infinity")
+            if r.returncode != 0:
+                raise RuntimeError(
+                    f"podman run 创建容器失败 ({r.returncode}): "
+                    f"{(r.stderr or r.stdout or '').strip()[:300]}")
         r = self._pod("ps", "--filter", f"name={self.container_name}", "--format", "{{.Names}}")
         if self.container_name not in (r.stdout or ""):
-            self._pod("start", self.container_name)
+            r = self._pod("start", self.container_name)
+            if r.returncode != 0:
+                raise RuntimeError(
+                    f"podman start 启动容器失败 ({r.returncode}): "
+                    f"{(r.stderr or r.stdout or '').strip()[:300]}")
         # 确保工作目录存在 (alpine 默认无 /home/agent, 挂载后即存在)
-        self._pod("exec", self.container_name, "sh", "-c",
-                  f"mkdir -p '{self.workdir}'")
+        r = self._pod("exec", self.container_name, "sh", "-c",
+                      f"mkdir -p {shlex.quote(self.workdir)}")
+        if r.returncode != 0:
+            raise RuntimeError(
+                f"podman exec 创建工作目录失败 ({r.returncode}): "
+                f"{(r.stderr or r.stdout or '').strip()[:300]}")
         # 预装 MCP filesystem 服务器包 (容器内全局安装, 之后启动即用, 免 npx 拉包)
         if not self._mcp_pkg_installed:
             r = self._pod("exec", self.container_name, "sh", "-c",
                           "npm ls -g --depth=0 2>/dev/null | grep -q 'server-filesystem' "
                           "|| npm install -g --no-fund --no-audit "
-                          f"'{MCP_FILESYSTEM_PACKAGE}'", timeout=300)
+                          f"{shlex.quote(MCP_FILESYSTEM_PACKAGE)}", timeout=300)
+            if r.returncode != 0:
+                raise RuntimeError(
+                    f"容器内预装 MCP filesystem 包失败 ({r.returncode}): "
+                    f"{(r.stderr or r.stdout or '').strip()[:300]}")
             self._mcp_pkg_installed = True
             logger.info("电脑[%s] 容器内已预装 MCP filesystem 服务器 (npm -g)",
                         self.role_id)
-
-    @property
-    def _mcp_pkg_installed(self) -> bool:
-        return getattr(self, "_mcp_pkg_flag", False)
-
-    @_mcp_pkg_installed.setter
-    def _mcp_pkg_installed(self, value: bool) -> None:
-        self._mcp_pkg_flag = value
 
     def power_on(self) -> str:
         try:
             self._ensure_container()
             self._on = True
+            # 跨天重连: 容器 stop 会杀死 MCP stdio 管道 (podman exec -i),
+            # 开机后检测会话存活, 死了就重建, 否则第 2 天起 MCP 文件工具全坏
+            self._reconnect_mcp_server()
             return (f"电脑[{self.role_id}] (podman 容器 {self.container_name}) 已开机. "
                     f"工作目录: {self.workdir}")
         except Exception as exc:
@@ -478,19 +552,62 @@ class PodmanComputer(Computer):
             return f"错误: 命令执行失败 - {exc}"
 
     def read_file(self, path: str) -> str:
-        return self.run_command(f"cat '{path}'")
+        # 路径经 argv 传入 (sh -c 的 $1), 不经 shell 解析 — 任何字符都按字面,
+        # 无注入面 (High-3). shlex.quote 方案在 busybox ash 对
+        # 单引号+空格+$()+反引号组合的路径会解析出错, 这里彻底绕开.
+        return self._exec_argv("cat -- \"$1\"", path)
 
     def write_file(self, path: str, content: str) -> str:
-        # 用 heredoc 写入容器内文件: $(dirname) 必须可展开 → 用双引号包 $(),
-        # 内部路径用单引号保护空格
-        escaped = content.replace("'", "'\\''")
-        return self.run_command(
-            f"mkdir -p \"$(dirname '{path}')\" && cat > '{path}' <<'EOF'\n{escaped}\nEOF"
-        )
+        """写入容器内文件: 内容经 stdin (exec -i), 路径经 argv ($1/$2).
+
+        - 内容不进 shell 命令 (无 heredoc/无转义) — 二进制安全
+        - 父目录与路径都作为独立 argv 传给 sh -c, 不经 shell 引号解析,
+          含单引号/反引号/$()/空格的字面路径也不会执行或被截断
+        """
+        if not self._on:
+            return "错误: 电脑未开机."
+        parent = str(Path(path).parent) if "/" in path else "."
+        try:
+            r = subprocess.run(
+                ["podman", "exec", "-i", self.container_name, "sh", "-c",
+                 'mkdir -p -- "$2" && cat > "$1"', "sh", path, parent],
+                capture_output=True, text=True, timeout=60, input=content,
+            )
+            output = (r.stdout or "") + (r.stderr or "")
+            if r.returncode != 0:
+                return f"[exit {r.returncode}] {output.strip()[:2000]}"
+            return output.strip()[:2000] or "(无输出)"
+        except Exception as exc:
+            return f"错误: 命令执行失败 - {exc}"
+
+    def _exec_argv(self, script: str, *args: str, timeout: int = 60) -> str:
+        """以 argv 方式执行容器内命令 (脚本 + 参数分离, 路径不经 shell 解析).
+
+        参数:
+            script: sh -c 的脚本 (用 $1/$2... 引用参数).
+            *args:  传给脚本的位置参数 (字面透传, 不经过 shell 引号).
+        """
+        if not self._on:
+            return "错误: 电脑未开机."
+        try:
+            r = subprocess.run(
+                ["podman", "exec", self.container_name, "sh", "-c", script,
+                 "sh", *args],
+                capture_output=True, text=True, timeout=timeout,
+            )
+            output = (r.stdout or "") + (r.stderr or "")
+            if r.returncode != 0:
+                return f"[exit {r.returncode}] {output.strip()[:2000]}"
+            return output.strip()[:2000] or "(无输出)"
+        except Exception as exc:
+            return f"错误: 命令执行失败 - {exc}"
 
     def list_dir(self, path: str = "") -> str:
         target = path or self.workdir
-        return self.run_command(f"ls -la '{target}'")
+        return self._exec_argv("ls -la -- \"$1\"", target)
+
+    def delete_file(self, path: str) -> str:
+        return self._exec_argv("rm -f -- \"$1\"", path)
 
     def describe(self) -> str:
         return (f"电脑[{self.role_id}] (podman 容器 {self.container_name}): "
@@ -573,15 +690,42 @@ class SSHComputer(Computer):
         return self._ssh(command)
 
     def read_file(self, path: str) -> str:
-        return self._ssh(f"cat '{path}'")
+        # shlex.quote: 防路径中的单引号/反引号/$() 闭合注入 (与 Podman 版一致)
+        return self._ssh(f"cat {shlex.quote(path)}")
 
     def write_file(self, path: str, content: str) -> str:
-        escaped = content.replace("'", "'\\''")
-        return self._ssh(f"mkdir -p '$(dirname '{path}')' && cat > '{path}' <<'EOF'\n{escaped}\nEOF")
+        """写入远程文件: 内容经 stdin 传入 ssh, 路径 shlex.quote (同 Podman 版)."""
+        if not self._on:
+            return "错误: 电脑未开机."
+        q = shlex.quote
+        parent = str(Path(path).parent) if "/" in path else "."
+        target = self.host
+        if self.user:
+            target = f"{self.user}@{target}"
+        cmd = ["ssh", "-p", str(self.port), "-o", "StrictHostKeyChecking=no",
+               "-o", "ConnectTimeout=10"]
+        if self.key_path:
+            cmd += ["-i", self.key_path]
+        cmd += [target, f"mkdir -p {self.workdir} && cd {self.workdir} && "
+                        f"mkdir -p {q(parent)} && cat > {q(path)}"]
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=60,
+                               input=content)
+            output = (r.stdout or "") + (r.stderr or "")
+            if r.returncode != 0:
+                return f"[exit {r.returncode}] {output.strip()[:2000]}"
+            return output.strip()[:2000] or "(无输出)"
+        except subprocess.TimeoutExpired:
+            return "错误: ssh 命令超时 (60s)."
+        except Exception as exc:
+            return f"错误: ssh 执行失败 - {exc}"
 
     def list_dir(self, path: str = "") -> str:
         target = path or self.workdir
-        return self._ssh(f"ls -la '{target}'")
+        return self._ssh(f"ls -la {shlex.quote(target)}")
+
+    def delete_file(self, path: str) -> str:
+        return self._ssh(f"rm -f {shlex.quote(path)}")
 
 
 # ── 工厂 ──────────────────────────────────────────────────

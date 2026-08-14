@@ -13,7 +13,6 @@ Supports:
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
@@ -252,16 +251,6 @@ def create_web_toolkit() -> ToolKit:
     return tk
 
 
-# ═══════════════════════════════════════════════════════════
-#  Built-in ToolKits registry
-# ═══════════════════════════════════════════════════════════
-
-BUILTIN_TOOLKITS: dict[str, Callable[..., ToolKit]] = {
-    "coding": create_coding_toolkit,
-    "web": create_web_toolkit,
-}
-
-
 # ── ToolRegistry (updated for ToolKit support) ────────────
 
 class ToolRegistry:
@@ -396,44 +385,6 @@ class ToolRegistry:
                 content=[TextContent(text=f"Tool error: {exc}")],
                 is_error=True,
             )
-
-    def get_tools_prompt(self) -> str:
-        """Generate a prompt snippet describing available tools for the LLM."""
-        tools = self.list_tools()
-        if not tools:
-            return ""
-
-        # Group by toolkit
-        by_toolkit: dict[str, list[dict]] = {}
-        for t in tools:
-            src = self._tool_source.get(t["name"], "other")
-            by_toolkit.setdefault(src, []).append(t)
-
-        lines = ["You have access to the following tools. To use a tool, respond with:"]
-        lines.append('```tool_call')
-        lines.append('{"tool": "<tool_name>", "<参数名>": <值>, ...}')
-        lines.append('```')
-        lines.append('例如: {"tool": "write_note", "title": "会议记录", "content": "..."}')
-        lines.append("")
-
-        for tk_name, tk_tools in by_toolkit.items():
-            lines.append(f"### {tk_name}")
-            for t in tk_tools:
-                schema_str = json.dumps(t["input_schema"], ensure_ascii=False)
-                lines.append(f"- **{t['name']}**: {t['description']}")
-                lines.append(f"  Input: {schema_str}")
-            lines.append("")
-
-        # 使用规则: 防止 LLM 无限探索工具
-        lines.append("Rules:")
-        lines.append("- 只调用你确实需要的工具, 不要为了探索而逐个尝试所有工具.")
-        lines.append("- 任务明确时直接行动: 例如下班指令要求总结 → 直接调用 summary.")
-        lines.append("- 一次只调用一个工具 (或同一轮最多两个), 等待结果后再决定下一步.")
-        lines.append("- 任务已完成时, 直接输出最终答复, 不要再调用任何工具.")
-        lines.append("- 不要重复调用相同参数的同一工具 (如反复 get_time).")
-        lines.append("- 简单任务不需要工具时, 直接回复即可.")
-
-        return "\n".join(lines)
 
     def to_openai_tools(self) -> list[dict]:
         """生成 OpenAI 原生 function calling 格式的工具声明列表.
