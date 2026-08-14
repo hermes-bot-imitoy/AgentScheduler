@@ -128,146 +128,24 @@ class ToolKit:
         return name in self._tools
 
 
-# ═══════════════════════════════════════════════════════════
-#  Built-in Python ToolKits
-# ═══════════════════════════════════════════════════════════
-
-def create_coding_toolkit() -> ToolKit:
-    """Coding toolkit: file operations, code editing, command execution."""
-    import subprocess
-    from pathlib import Path
-
-    tk = ToolKit(name="coding", description="File and code operations")
-
-    def _read_file(args: dict) -> str:
-        path = Path(args["path"])
-        if not path.exists():
-            return f"Error: file not found: {path}"
-        limit = args.get("limit", 500)
-        content = path.read_text(encoding="utf-8")
-        lines = content.split("\n")
-        if len(lines) > limit:
-            return "\n".join(lines[:limit]) + f"\n... (truncated, {len(lines)} total lines)"
-        return content
-
-    def _edit_file(args: dict) -> str:
-        path = Path(args["path"])
-        old_text = args["old_text"]
-        new_text = args.get("new_text", "")
-        if not path.exists():
-            return f"Error: file not found: {path}"
-        content = path.read_text(encoding="utf-8")
-        if old_text not in content:
-            return f"Error: old_text not found in {path}"
-        content = content.replace(old_text, new_text, 1)
-        path.write_text(content, encoding="utf-8")
-        return f"File edited: {path}"
-
-    def _run_cmd(args: dict) -> str:
-        cmd = args["command"]
-        timeout = args.get("timeout", 30)
-        try:
-            result = subprocess.run(
-                cmd, shell=True, capture_output=True, text=True, timeout=timeout,
-            )
-            output = result.stdout or result.stderr
-            if result.returncode != 0:
-                return f"[exit {result.returncode}] {output[:2000]}"
-            return output[:2000]
-        except subprocess.TimeoutExpired:
-            return f"Error: command timed out after {timeout}s"
-
-    tk.add_python_tool(
-        "read_file", "Read a file from disk",
-        {"type": "object", "properties": {
-            "path": {"type": "string", "description": "File path to read"},
-            "limit": {"type": "integer", "description": "Max lines to return (default 500)"},
-        }, "required": ["path"]},
-        _read_file,
-    )
-
-    tk.add_python_tool(
-        "edit_file", "Edit a file by replacing old text with new text",
-        {"type": "object", "properties": {
-            "path": {"type": "string", "description": "File path to edit"},
-            "old_text": {"type": "string", "description": "Text to find and replace"},
-            "new_text": {"type": "string", "description": "Replacement text (empty to delete)"},
-        }, "required": ["path", "old_text"]},
-        _edit_file,
-    )
-
-    tk.add_python_tool(
-        "run_command", "Execute a shell command",
-        {"type": "object", "properties": {
-            "command": {"type": "string", "description": "Shell command to run"},
-            "timeout": {"type": "integer", "description": "Timeout in seconds (default 30)"},
-        }, "required": ["command"]},
-        _run_cmd,
-    )
-
-    return tk
-
-
-def create_web_toolkit() -> ToolKit:
-    """Web toolkit: HTTP requests, web scraping."""
-    tk = ToolKit(name="web", description="Web and HTTP operations")
-
-    def _http_get(args: dict) -> str:
-        import requests as req
-        url = args["url"]
-        try:
-            resp = req.get(url, timeout=10)
-            return resp.text[:3000]
-        except Exception as e:
-            return f"Error: {e}"
-
-    def _http_post(args: dict) -> str:
-        import requests as req
-        url = args["url"]
-        body = args.get("body", "{}")
-        try:
-            resp = req.post(url, data=body, timeout=10, headers={"Content-Type": "application/json"})
-            return f"Status {resp.status_code}: {resp.text[:2000]}"
-        except Exception as e:
-            return f"Error: {e}"
-
-    tk.add_python_tool(
-        "http_get", "Send HTTP GET request",
-        {"type": "object", "properties": {
-            "url": {"type": "string", "description": "URL to fetch"},
-        }, "required": ["url"]},
-        _http_get,
-    )
-
-    tk.add_python_tool(
-        "http_post", "Send HTTP POST request",
-        {"type": "object", "properties": {
-            "url": {"type": "string", "description": "URL to post to"},
-            "body": {"type": "string", "description": "Request body (JSON string)"},
-        }, "required": ["url"]},
-        _http_post,
-    )
-
-    return tk
-
-
-# ── ToolRegistry (updated for ToolKit support) ────────────
-
 class ToolRegistry:
     """Per-role tool registry that manages ToolKits.
 
     Supports:
-      - Adding individual Python tools (backward-compatible)
+      - Adding individual Python tools (single-tool registration)
       - Adding entire ToolKits at once (with duplicate detection)
       - Listing all tools across all loaded toolkits for LLM context
       - Executing tools by name (searches all toolkits)
 
     Usage:
         reg = ToolRegistry()
-        reg.add_toolkit(create_coding_toolkit())
-        reg.add_toolkit(create_web_toolkit())
+        tk = ToolKit(name="my_tools", description="...")
+        tk.add_python_tool("hello", "Say hello", {"type": "object", "properties": {}},
+                           handler=lambda a: "hi")
+        reg.add_toolkit(tk)
         # Duplicate detection: warns if two toolkits register same name
-        reg.call_tool("read_file", {"path": "/tmp/test.txt"})
+        reg.call_tool("hello", {})
+        # 完整"如何写 ToolKit"示例见 src/python_tools/examples/example_toolkits.py
     """
 
     def __init__(self):
@@ -321,7 +199,7 @@ class ToolRegistry:
                 removed += 1
         return removed
 
-    # ── Individual tool management (backward-compat) ──────
+    # ── Single tool management ────────────────────────
 
     def add_tool(
         self,
@@ -331,7 +209,7 @@ class ToolRegistry:
         handler: ToolHandler,
         source: str = "inline",
     ) -> None:
-        """Register a single Python tool (backward-compatible API)."""
+        """Register a single Python tool."""
         if name in self._tools:
             logger.warning("Tool '%s' already registered, overwriting", name)
         td = ToolDef(name=name, description=description, input_schema=input_schema,

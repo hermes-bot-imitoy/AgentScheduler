@@ -29,7 +29,6 @@ from src.core.roles import RolePool
 from src.core.role_templates import DEFAULT_ROLES, get_template
 from src.core.time_manager import EVENT_SHIFT_START, TimeEventBus
 from src.core.types import AgentState, Event
-from src.python_tools import DEFAULT_TOOLKITS
 
 logger = logging.getLogger(__name__)
 
@@ -85,16 +84,10 @@ class AgentSystem:
         # 绑定共享时间源 (角色 get_time / summary 取到同一时间)
         role.bind_time_manager(self.time_manager)
 
-        # 自动注册默认工具类 (除 hr/client 外的全部工具, 见 python_tools.DEFAULT_TOOLKITS)
+        # 自动装配默认工具 + MCP 组 — 统一走 pool._setup_role (唯一入口,
+        # 与招聘入职 add_role_and_start 同一条路径, 防止装配逻辑漂移)
         if self.auto_toolkits:
-            for factory in DEFAULT_TOOLKITS.values():
-                role.add_toolkit(factory())
-
-        # 自动装配默认 MCP 工具组 (如 file_ops 文件操作) 到角色个人电脑
-        if self.auto_toolkits:
-            from src.python_tools import DEFAULT_MCP_GROUPS, _MCP_MANAGER
-            for group in DEFAULT_MCP_GROUPS:
-                _MCP_MANAGER.install_group_defaults(role, group)
+            self.pool._setup_role(role)
 
         self.pool.add_role(role)
         logger.info("AgentSystem: 角色已注册 %s (%s)", role.role_id, role.name)

@@ -1,7 +1,7 @@
-# MAF Scheduler 接口文档
+# Shift & Event-Driven Agent Scheduler 接口文档
 
 **多角色、事件驱动、Tick 作息制的 Agent 调度框架**（Shift & Event-Driven Agent Scheduler）。
-本文档覆盖全部核心类、工具类、工作流的接口、用途、参数与使用示例。
+本文档覆盖全部核心类与工具类的接口、用途、参数与使用示例。
 
 ---
 
@@ -10,7 +10,7 @@
 1. [架构总览](#架构总览)
 2. [核心类型 types.py](#核心类型)
 3. [时间系统 time_manager.py](#时间系统)
-4. [存储 NoteStore / AmbientBuffer](#存储)
+4. [存储 NoteStore](#存储)
 5. [角色系统 roles.py](#角色系统)
 6. [事件系统 EventBus / EventDispatcher](#事件系统)
 7. [系统管理 AgentSystem](#系统管理)
@@ -18,9 +18,8 @@
 9. [工具系统 tools.py](#工具系统)
 10. [Python 工具类 python_tools/](#python-工具类)
 11. [MCP 加载器 mcp_toolkit.py](#mcp-加载器)
-12. [工作流 workflow/](#工作流)
-13. [LLM 客户端 llm.py](#llm-客户端)
-14. [完整示例](#完整示例)
+12. [LLM 客户端 llm.py](#llm-客户端)
+13. [完整示例](#完整示例)
 
 ---
 
@@ -71,9 +70,6 @@
 | `ON_DUTY_BUSY` | 上班忙碌（执行任务中） |
 | `WRAPPING_UP` | 收尾中（预留） |
 
-### `FilterDecision(str, Enum)`
-`PASS` 通过 / `AMBIENT` 入潜意识缓冲 / `BLOCKED` 状态拦截 / `DROPPED` 丢弃。
-
 ### `Event`（dataclass）
 ```python
 Event(
@@ -84,16 +80,9 @@ Event(
     payload: dict = {},          # 载荷
     timestamp: datetime = now,
     target_role: Optional[str] = None,  # 定向投递: 只发给该角色; None=广播
-    salience_score: float = 0.0,       # 过滤后填充
-    filter_decision: FilterDecision = PASS,
-    blocked_reason: str = "",
+    trigger_tick: Optional[int] = None, # 触发绝对 Tick (None=立即, 由 TimeEventBus 设置)
 )
 ```
-
-### `Journal` / `SessionContext` / `Artifact`
-- `Journal`：结构化日记（旧作息系统遗留，当前用 NoteStore 代替）
-- `SessionContext`：单 Agent 会话上下文（session_id/history/checkpoints）
-- `Artifact`：工作流节点返回的结构化产物 `{task_id, status, summary, data, error, tokens_consumed}`
 
 ---
 
@@ -173,31 +162,23 @@ tm.stop()
 ## 存储
 
 ### `NoteStore` — 文件笔记与总结
-文件: `src/core/note_store.py`。每角色独立目录 `data/notes/<role_id>/`。
+文件: `src/core/note_store.py`。每角色独立目录（有个人电脑时在电脑工作目录
+`<workdir>/notes/`，否则本地 `data/notes/<role_id>/`）。
 
 ```python
-NoteStore(base_dir="./data/notes", role_id="")
+NoteStore(base_dir="./data/notes", role_id="", computer=None)
 ```
 
 | 方法 | 参数 | 返回 | 说明 |
 |------|------|------|------|
-| `write_note(title, content)` | str,str | str(路径) | 写笔记（存在则覆盖） |
+| `write_note(title, content)` | str,str | str(路径) | 写笔记（存在则覆盖；标题清洗 shell 元字符） |
 | `edit_note(title, content)` | str,str | str(路径) | 编辑笔记（不存在则创建） |
 | `list_notes()` | — | list[str] | 笔记标题列表（不含总结） |
 | `read_note(title)` | str | Optional[str] | 读笔记，不存在返回 None |
-| `delete_note(title)` | str | bool | 删笔记 |
+| `delete_note(title)` | str | bool | 删笔记（真实删除文件） |
 | `save_summary(content, day=None)` | str,int\|None | str(路径) | 保存第 N 天总结 `_summary_day_N.md` |
 | `get_summary(day=None)` | int\|None | Optional[str] | 读指定天总结 |
 | `get_latest_summary(before_day=None)` | int\|None | Optional[str] | 最近一次总结（严格早于 before_day） |
-
-### `AmbientBuffer` — 潜意识暂存（SQLite）
-文件: `src/storage/ambient_buffer.py`。存储被过滤的低显著度事件。
-
-| 方法 | 参数 | 返回 |
-|------|------|------|
-| `append(agent_id, event)` | str, Event | int(row_id) |
-| `get_and_clear(agent_id)` | str | list[Event]（取出并清空） |
-| `count_pending(agent_id)` | str | int |
 
 ---
 
@@ -269,19 +250,22 @@ pool.shutdown()
 
 ## 事件系统
 
-### `EventBus` — 单 Agent 过滤总线
+### `EventBus` — 定时事件调度表
 文件: `src/core/event_bus.py`
 
+只承担"定时事件注册 / 取消 / 到期取出"的调度表职责；**不含过滤管线**
+（3 层过滤是每角色独立的 `AgentRole.evaluate_event`，见角色系统章）。
+
 ```python
-EventBus(buffer=None, salience_threshold=0.4)
+EventBus()   # TimeEventBus 是其子类 (time_manager.py), 提供时间线程
 ```
 
-| 方法 | 参数 | 返回 |
-|------|------|------|
-| `set_state_getter(fn)` | `fn() -> AgentState` | None |
-| `set_relevance_fn(fn)` | `fn(Event) -> float` | None |
-| `process_event(event, agent_id="default")` | Event, str | FilterDecision |
-| `get_stats()` / `reset_stats()` | — | dict / None |
+| 方法 | 参数 | 返回 | 说明 |
+|------|------|------|------|
+| `register_event(event, tick)` | Event, int | str(事件ID) | 注册定时事件到调度表（tick 必须显式；立即触发用 TimeEventBus） |
+| `cancel_event(event_id)` | str | bool | 取消定时事件 |
+| `list_scheduled_events()` | — | list[dict] | 待触发事件（按 tick 排序） |
+| `_check_due_events(current_tick)` | int | list[Event] | 取出到期事件（时间线程调用） |
 
 ### `EventDispatcher` — 多角色广播/定向分发
 文件: `src/core/dispatcher.py`
@@ -442,32 +426,6 @@ loader = MCPToolLoader()
 toolkits = loader.load()
 loader.close()
 ```
-
----
-
-## 工作流
-
-文件: `src/workflow/engine.py`
-
-### `WorkflowNode`（dataclass）
-`{node_id, task, next: dict[str, str] | Callable}` — 节点 + 转移规则。
-
-### `WorkflowContext`
-`{variables, checkpoints}` 跨节点共享状态。
-
-### `WorkflowEngine`
-| 方法 | 参数 | 返回 |
-|------|------|------|
-| `register_graph(graph_id, nodes)` | str, list[WorkflowNode] | None |
-| `get_graph(graph_id)` | str | dict[node_id, WorkflowNode] |
-| `execute(graph_id, session, task_input, entry_node="start")` | str, SessionContext, dict, str | Artifact |
-
-执行器特性：会话历史只追加摘要（不存冗长工具日志）、子任务上下文隔离、只返回结构化 Artifact。
-
-文件: `src/workflow/agent_workflow.py`
-`build_business_workflow(engine)` — 注册业务图（START→classify→handle_task→summarize→END）。
-
----
 
 ## LLM 客户端
 

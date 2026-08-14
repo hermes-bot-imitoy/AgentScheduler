@@ -1,142 +1,61 @@
-"""Event Bus — 外围事件总线 & 多层级显著性过滤器.
+"""Event Bus — 定时事件调度表 (时间层底座).
 
-Three-layer filter pipeline:
-  Layer 1 — State Mask (0 Token): block non-emergency events when OFF_DUTY
-  Layer 2 — Salience Evaluator: compute salience_score, park low-relevance events
-  Layer 3 — Wake: pass through to the agent workflow engine
+EventBus 只承担"定时事件注册 / 取消 / 到期取出"的调度表职责:
+  - register_event(ev, tick=N): 存入 _tick_schedule
+  - cancel_event / list_scheduled_events / _check_due_events
 
-This is the gatekeeper. Every event that reaches an LLM has already
-passed through these zero/low-cost filters, keeping Token spend minimal.
+**事件过滤不在 EventBus** (2026-08 收敛): 3 层过滤是每角色独立的
+`AgentRole.evaluate_event()` (roles.py)。运行时路径:
+  TimeEventBus._dispatch → AgentSystem._on_time_event → EventDispatcher.trigger
+  → role.evaluate_event (Layer 1 状态掩码 → Layer 2 显著性 → 转 Task 入队)。
+旧的 `process_event` 单 Agent 过滤管线与 AmbientBuffer 已删除。
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Optional, Protocol
+from typing import Any, Optional
 
-from src.core.types import AgentState, Event, FilterDecision, Priority
-from src.storage.ambient_buffer import AmbientBuffer
+from src.core.types import Event
 
 logger = logging.getLogger(__name__)
 
-# ── Salience threshold ─────────────────────────────────────
-SALIENCE_THRESHOLD: float = 0.4
 
-
-# ── Protocol for persona relevance scoring ─────────────────
-
-class PersonaRelevanceFn(Protocol):
-    """A policy function: given an event, return [0.0 .. 1.0] relevance to the agent's persona."""
-    def __call__(self, event: Event) -> float: ...
-
-
-# ── Default relevance policy ───────────────────────────────
-
-# # 默认相关性评分器(关键词匹配). 生产环境应替换为RAG/embedding. 返回0~1分数
-def _default_relevance(event: Event) -> float:
-    """Simple keyword-based relevance scorer. Replace with RAG/embedding for production.
-
-    Checks both the event_type and payload for persona-relevant keywords.
-    """
-    source_keywords: dict[str, set[str]] = {
-        "github": {"pr", "issue", "review", "deploy", "bug", "fix", "security", "release"},
-        "email":  {"urgent", "boss", "deadline", "report", "incident"},
-        "slack":  {"@mention", "direct", "ask", "help", "urgent"},
-        "cron":   {"backup", "healthcheck", "alert", "failure", "error"},
-    }
-    source_words = source_keywords.get(event.source.lower(), set())
-
-    # Check event_type first
-    event_type_text = event.event_type.lower()
-    payload_text = str(event.payload).lower()
-    combined_text = f"{event_type_text} {payload_text}"
-
-    # Count keyword hits
-    hits = sum(1 for kw in source_words if kw in combined_text)
-
-    # Bonus: "urgent" anywhere is a strong signal
-    urgent_bonus = 0.2 if "urgent" in combined_text else 0.0
-    # Bonus: HIGH/EMERGENCY priority events get inherent relevance boost
-    priority_bonus = 0.0
-    if event.priority >= Priority.HIGH:
-        priority_bonus = 0.15
-
-    # Score: base 0.25 + hit bonus + urgent bonus + priority bonus
-    base = 0.25
-    hit_bonus = min(0.5, 0.15 * hits)
-    return min(1.0, base + hit_bonus + urgent_bonus + priority_bonus)
-
-
-# ── Event Bus ───────────────────────────────────────────────
-
-# # 事件总线: 3层过滤器. Layer1=状态掩码(0Token), Layer2=显著性(关键词+优先级), Layer3=唤醒
 class EventBus:
-    """The central event bus with multi-layer filtering.
+    """定时事件调度表: {event_id: (trigger_tick, Event)}.
 
-    Usage:
-        bus = EventBus(buffer=AmbientBuffer())
-        bus.set_state_getter(lambda: agent.state)           # Layer 1
-        bus.set_relevance_fn(my_custom_relevance_fn)         # Layer 2
-        decision = bus.process_event(event)                   # Run pipeline
+    子类 TimeEventBus (time_manager.py) 提供时间线程与事件发送回调;
+    本类不持有任何过滤管线 (3 层过滤在 AgentRole.evaluate_event).
     """
 
-    def __init__(
-        self,
-        buffer: Optional[AmbientBuffer] = None,
-        salience_threshold: float = SALIENCE_THRESHOLD,
-    ):
-        self._buffer = buffer or AmbientBuffer()
-        self._salience_threshold = salience_threshold
-
-        # Runtime hooks (injected by the agent runtime)
-        self._state_getter: Callable[[], AgentState] = lambda: AgentState.ON_DUTY_IDLE
-        self._relevance_fn: PersonaRelevanceFn = _default_relevance
-
-        # 定时事件调度表: {event_id: (trigger_tick, Event)} — 时间线程到期投递
+    def __init__(self) -> None:
         self._tick_schedule: dict[str, tuple[int, Event]] = {}
 
-        # Metrics
-        self.stats: dict[str, int] = {
-            "total_events": 0,
-            "passed": 0,
-            "ambient": 0,
-            "blocked": 0,
-            "dropped": 0,
-        }
-
-    # ── Configuration ─────────────────────────────────────
-
-    def set_state_getter(self, fn: Callable[[], AgentState]) -> None:
-        self._state_getter = fn
-
-    def set_relevance_fn(self, fn: PersonaRelevanceFn) -> None:
-        self._relevance_fn = fn
-
-    # ── Event registration (时间与事件深度绑定) ──────────
+    # ── 事件注册 (时间与事件深度绑定) ────────────────────
 
     def register_event(self, event: Event, tick: Optional[int] = None) -> str:
-        """向事件总线注册一个事件.
-
-        tick 语义 (时间与事件深度绑定):
-          - tick=None (默认): 立即触发 — 直接进入 3 层过滤管线
-          - tick=整数:        在指定绝对 Tick 触发 — 存入调度表,
-                              由时间线程 (TimeEventBus) 到期自动投递.
+        """向调度表注册一个定时事件.
 
         参数:
             event: 要注册的 Event.
-            tick:  触发 Tick (绝对 Tick, 自系统启动累计). None = 立即.
+            tick:  触发绝对 Tick (必填; None 已无意义 — 立即触发请用
+                   TimeEventBus.register_event, 它走 _dispatch → EventDispatcher).
 
         返回:
             事件 ID.
+
+        异常:
+            ValueError: tick 为 None (裸 EventBus 无发送回调, 无法立即投递).
         """
         if tick is None:
-            # 立即触发: 进入 3 层过滤管线
-            self.process_event(event)
-        else:
-            event.trigger_tick = tick
-            self._tick_schedule[event.id] = (tick, event)
-            logger.info("EventBus 注册定时事件: id=%s type=%s → tick %d (立即触发=%s)",
-                        event.id, event.event_type, tick, False)
+            raise ValueError(
+                "EventBus.register_event 需要显式 tick (立即触发请用 "
+                "TimeEventBus.register_event, 它走 _dispatch → EventDispatcher)"
+            )
+        event.trigger_tick = tick
+        self._tick_schedule[event.id] = (tick, event)
+        logger.info("EventBus 注册定时事件: id=%s type=%s → tick %d",
+                    event.id, event.event_type, tick)
         return event.id
 
     def cancel_event(self, event_id: str) -> bool:
@@ -167,55 +86,3 @@ class EventBus:
                 del self._tick_schedule[eid]
                 due.append(ev)
         return due
-
-    # ── Pipeline ──────────────────────────────────────────
-
-# # 运行3层过滤管线. 参数event=事件, agent_id=Agent标识. 返回FilterDecision. 被拦截事件自动存入AmbientBuffer
-    def process_event(self, event: Event, agent_id: str = "default") -> FilterDecision:
-        """Run the event through the 3-layer filter pipeline.
-
-        Returns the final FilterDecision. Side-effects:
-          - BLOCKED/AMBIENT events are parked in AmbientBuffer.
-          - PASS events are returned ready for the workflow engine.
-          - Stats are updated.
-        """
-        self.stats["total_events"] += 1
-        logger.debug("EventBus received: id=%s type=%s priority=%s", event.id, event.event_type, event.priority.name)
-
-        # ── Layer 1: State Mask (0 Token) ──────────────────
-        current_state = self._state_getter()
-        if current_state in (AgentState.OFF_DUTY, AgentState.WRAPPING_UP):
-            if event.priority < Priority.EMERGENCY:
-                event.filter_decision = FilterDecision.BLOCKED
-                event.blocked_reason = f"Agent is {current_state.value} (non-emergency)"
-                self._buffer.append(agent_id, event)
-                self.stats["blocked"] += 1
-                logger.info("Layer1 BLOCKED: %s (state=%s)", event.id, current_state.value)
-                return FilterDecision.BLOCKED
-
-        # ── Layer 2: Salience Evaluator ────────────────────
-        relevance = self._relevance_fn(event)
-        event.salience_score = event.priority.value / Priority.EMERGENCY.value * relevance
-
-        if event.salience_score < self._salience_threshold:
-            event.filter_decision = FilterDecision.AMBIENT
-            event.blocked_reason = (
-                f"Salience {event.salience_score:.2f} < threshold {self._salience_threshold}"
-            )
-            self._buffer.append(agent_id, event)
-            self.stats["ambient"] += 1
-            logger.info("Layer2 AMBIENT: %s (score=%.2f)", event.id, event.salience_score)
-            return FilterDecision.AMBIENT
-
-        # ── Layer 3: Wake ─────────────────────────────────
-        event.filter_decision = FilterDecision.PASS
-        self.stats["passed"] += 1
-        logger.info("Layer3 PASS: %s → workflow engine", event.id)
-        return FilterDecision.PASS
-
-    def get_stats(self) -> dict[str, int]:
-        return dict(self.stats)
-
-    def reset_stats(self) -> None:
-        for k in self.stats:
-            self.stats[k] = 0

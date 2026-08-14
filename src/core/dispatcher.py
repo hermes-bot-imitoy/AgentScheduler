@@ -13,7 +13,7 @@ import logging
 from typing import Any
 
 from src.core.roles import AgentRole, RolePool, Task
-from src.core.types import AgentState, Event, FilterDecision, Priority
+from src.core.types import AgentState, Event, Priority
 
 logger = logging.getLogger(__name__)
 
@@ -68,23 +68,24 @@ class EventDispatcher:
         # 定向事件: 只投递给 target_role, 其他角色跳过
         if event.target_role is not None:
             # 目标角色不存在: 不能静默丢弃, 打警告并返回 (其余角色已标记跳过)
-            if event.target_role not in self._pool._roles:
+            if event.target_role not in {r.role_id for r in self._pool.all_roles()}:
                 logger.warning(
                     "EventDispatcher: 定向事件目标角色 '%s' 不存在, 事件丢弃 "
                     "(id=%s type=%s)", event.target_role, event.id, event.event_type)
                 return results
-            for role_name in self._pool._roles:
-                if role_name == event.target_role:
+            for role in self._pool.all_roles():
+                if role.role_id == event.target_role:
                     continue
                 self.stats["roles_notified"] += 1
                 self.stats["roles_skipped"] += 1
-                results[role_name] = {
+                results[role.role_id] = {
                     "accepted": False,
                     "reason": f"定向事件, 目标: {event.target_role}",
                     "task_id": None,
                 }
 
-        for role_name, role in self._pool._roles.items():
+        for role in self._pool.all_roles():
+            role_name = role.role_id
             # 定向事件: 只处理目标角色, 直接接受 (任务是它自己创建的提醒)
             if event.target_role is not None:
                 if role_name != event.target_role:

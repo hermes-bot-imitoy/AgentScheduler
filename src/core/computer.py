@@ -204,21 +204,9 @@ class Computer(ABC):
             return []
         return self.list_installed_mcp_tools()
 
-    def install_mcp_tool(self, tool_def: Any) -> None:
-        """将 MCP 工具安装到本电脑 (按工具名记录).
-
-        参数:
-            tool_def: ToolDef 实例 (来自 MCPManager 工具池).
-        """
-        self._mcp_tools[tool_def.name] = tool_def
-
     def uninstall_mcp_tool(self, tool_name: str) -> bool:
         """从本电脑卸载一个 MCP 工具. 返回是否卸载成功."""
         return self._mcp_tools.pop(tool_name, None) is not None
-
-    def has_mcp_tool(self, tool_name: str) -> bool:
-        """本电脑是否已安装指定 MCP 工具."""
-        return tool_name in self._mcp_tools
 
     def list_installed_mcp_tools(self) -> list[str]:
         """列出本电脑已安装的 MCP 工具名 (排序)."""
@@ -481,7 +469,6 @@ class PodmanComputer(Computer):
         r = self._pod("ps", "-a", "--filter", f"name={self.container_name}", "--format", "{{.Names}}")
         if self.container_name not in (r.stdout or ""):
             # 加入自定义桥接网络 (电脑间互通), 网络不存在则先创建
-            from src.core.computer import _COMPUTER_MANAGER
             network = _COMPUTER_MANAGER.ensure_network()
             r = self._pod("run", "-d", "--name", self.container_name,
                           "--network", network,

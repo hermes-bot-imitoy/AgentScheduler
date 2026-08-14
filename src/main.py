@@ -206,15 +206,17 @@ def run_one_day(system: AgentSystem, day: int, with_client_task: bool) -> None:
     ok(f"OFF_DUTY 角色: {off_duty}") if off_duty else warn("角色仍未全部 OFF_DUTY")
 
     for rid in ROLE_IDS:
-        summary = system.get_role(rid).note_store.get_summary(day=day)
+        role = system.get_role(rid)
+        summary = role.note_store.get_summary(day=day)
         if summary is None:
             # summary 工具保存后立即关机, 电脑回读路径失效 ("电脑未开机").
-            # 直接读宿主机挂载目录 (Podman 挂载 data/computers/<role>/notes,
-            # LocalComputer 的 workdir 也是同一路径), 关机也能读到.
-            host_summary = PROJECT_ROOT / "data" / "computers" / rid / "notes" \
-                / f"_summary_day_{day}.md"
-            if host_summary.exists():
-                summary = host_summary.read_text(encoding="utf-8")
+            # 直接读宿主机挂载目录 (Podman/Local 的 host_dir 都是
+            # data/computers/<rid>, 关机也能读到; SSH 无映射则跳过).
+            host_dir = role.computer.host_dir
+            if host_dir:
+                host_summary = Path(host_dir) / "notes" / f"_summary_day_{day}.md"
+                if host_summary.exists():
+                    summary = host_summary.read_text(encoding="utf-8")
         if summary:
             ok(f"[{rid}] 第{day}天总结已保存: {summary[:50]}...")
         else:

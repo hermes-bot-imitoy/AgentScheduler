@@ -29,14 +29,6 @@ class Priority(IntEnum):
     EMERGENCY = 10
 
 
-class FilterDecision(str, Enum):
-    """Decision made by the event filter pipeline."""
-    PASS       = "PASS"        # 通过所有过滤层，唤醒 Agent
-    AMBIENT    = "AMBIENT"     # 低显著度，压入潜意识缓冲区
-    BLOCKED    = "BLOCKED"     # 状态掩码拦截（如 OFF_DUTY 非紧急事件）
-    DROPPED    = "DROPPED"     # 完全丢弃（如重复事件、过期事件）
-
-
 # ── Events ───────────────────────────────────────────────────
 
 @dataclass
@@ -53,69 +45,6 @@ class Event:
     # 定向投递: 只发给指定 role_id (None = 广播给所有角色)
     target_role: Optional[str] = None
 
-    # 触发 Tick: None = 立即触发 (注册即进管线); 整数 = 在指定绝对 Tick 触发
+    # 触发 Tick: None = 立即触发; 整数 = 在指定绝对 Tick 触发
     # (由 TimeEventBus 的时间线程到期投递). 用于"时间与事件深度绑定".
     trigger_tick: Optional[int] = None
-
-    # Filter metadata (set during processing)
-    salience_score: float = 0.0
-    filter_decision: FilterDecision = FilterDecision.PASS
-    blocked_reason: str = ""
-
-
-# ── Journal ──────────────────────────────────────────────────
-
-@dataclass
-# # 结构化下班日记: agent_id, date(日期), summary(总结), key_decisions, pending_tasks, ambient_highlights
-class Journal:
-    """A structured end-of-shift diary entry."""
-    agent_id: str
-    date: str                           # ISO date, e.g. "2026-07-29"
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    summary: str = ""                   # LLM-generated summary of the day
-    key_decisions: list[str] = field(default_factory=list)
-    pending_tasks: list[str] = field(default_factory=list)
-    ambient_highlights: list[str] = field(default_factory=list)  # Notable ambient events
-    raw_log: str = ""                   # Full session trace (truncated)
-
-
-# ── Session ──────────────────────────────────────────────────
-
-@dataclass
-class SessionContext:
-    """An isolated session context bound to one agent.
-
-    会话上下文: 绑定单个Agent, 包含 system_prompt, history, checkpoints
-    """
-    session_id: str = field(default_factory=lambda: uuid.uuid4().hex[:16])
-    agent_id: str = ""
-    state: AgentState = AgentState.OFF_DUTY
-
-    # Context window
-    system_prompt: str = ""
-    history: list[dict[str, str]] = field(default_factory=list)
-
-    # Checkpointing
-    checkpoints: dict[str, Any] = field(default_factory=dict)
-    last_checkpoint_step: int = 0
-
-# # 清空全部对话历史(Context Flush). 销毁history, checkpoints, last_checkpoint_step
-    def clear_history(self) -> None:
-        """Flush the entire conversation history (Context Flush)."""
-        self.history.clear()
-        self.checkpoints.clear()
-        self.last_checkpoint_step = 0
-
-
-# ── Artifact ─────────────────────────────────────────────────
-
-@dataclass
-# # 工作流任务的结构化产出物: task_id, status, summary, data, error, tokens_consumed
-class Artifact:
-    """Structured output from a completed workflow task."""
-    task_id: str = ""
-    status: str = "completed"           # "completed" | "failed" | "delegated"
-    summary: str = ""
-    data: dict[str, Any] = field(default_factory=dict)
-    error: str = ""
-    tokens_consumed: int = 0

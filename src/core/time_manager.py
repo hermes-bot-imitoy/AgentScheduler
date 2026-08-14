@@ -703,9 +703,3 @@ class TimeEventBus(EventBus):
                     event_type, day, tick, event.payload["time"], event.priority.name)
 
         self._dispatch(event)
-
-
-# ── 向后兼容别名 ─────────────────────────────────────────
-# TimeEventBus 已并入 EventBus 成为 TimeEventBus, 保留原名方便既有代码引用
-# (agent_system / roles 等仍 from src.core.time_manager import TimeEventBus).
-# (TimeEventBus 兼容别名已移除 — 统一使用 TimeEventBus)

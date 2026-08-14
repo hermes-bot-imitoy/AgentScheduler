@@ -44,6 +44,40 @@ class ToolLoopError(RuntimeError):
     """工具调用循环超限或 LLM 调用失败. 任务应标记 failed, 错误文本不作为成功结果."""
 
 
+# ── 工具类绑定分发表 ───────────────────────────────────────
+# toolkit.name → 绑定函数 (toolkit, role). 消除 AgentRole.add_toolkit 里的
+# if/elif 链: 新增工具类只需在此注册一行 (延迟导入避免 import 循环).
+_TOOLKIT_BINDERS: Optional[dict[str, Callable[[Any, Any], None]]] = None
+
+
+def _toolkit_binders() -> dict[str, Callable[[Any, Any], None]]:
+    """返回工具类绑定分发表 (惰性初始化, 首次调用时导入各 bind 函数).
+
+    holder 模式: 绑定函数只把角色引用放进 toolkit 的 holder,
+    工具 handler 在调用时才读取, 跨线程安全.
+    """
+    global _TOOLKIT_BINDERS
+    if _TOOLKIT_BINDERS is None:
+        from src.python_tools.computer_toolkit import bind_computer_to_toolkit
+        from src.python_tools.hr_toolkit import bind_role_to_toolkit as bind_hr
+        from src.python_tools.mcp_manager import bind_mcp_manager_to_toolkit
+        from src.python_tools.memory_toolkit import bind_store_to_toolkit
+        from src.python_tools.skill_toolkit import bind_role_to_toolkit as bind_skill
+        from src.python_tools.task_toolkit import bind_role_to_toolkit as bind_task
+        from src.python_tools.time_toolkit import bind_time_to_toolkit
+
+        _TOOLKIT_BINDERS = {
+            "memory":        lambda tk, role: bind_store_to_toolkit(tk, role.note_store, role=role),
+            "time":          lambda tk, role: bind_time_to_toolkit(tk, role.time_manager, role=role),
+            "task":          lambda tk, role: bind_task(tk, role),
+            "mcp_manager":   lambda tk, role: bind_mcp_manager_to_toolkit(tk, role),
+            "skill_manager": lambda tk, role: bind_skill(tk, role),
+            "hr":            lambda tk, role: bind_hr(tk, role),
+            "computer":      lambda tk, role: bind_computer_to_toolkit(tk, role),
+        }
+    return _TOOLKIT_BINDERS
+
+
 # ── Urgency ────────────────────────────────────────────────
 
 class Urgency(IntEnum):
@@ -318,15 +352,29 @@ class AgentRole:
 
     # ── Time manager (作息时间) ───────────────────────────
 
+    # 进程级默认共享时钟: 绕过 AgentSystem/RolePool 直接构造的角色
+    # (独立测试、RoleFactory 单用) 也拿到同一个时钟, 不再每角色新建
+    # 一个游离的未启动实例 (曾导致 get_time 永远第 1 天 Tick 0).
+    # AgentSystem.add_role / RolePool._setup_role 会用系统共享实例覆盖.
+    _DEFAULT_TIME_MANAGER: Any = None
+
+    @staticmethod
+    def _get_default_time_manager() -> Any:
+        """惰性创建进程级默认 TimeEventBus (避免 import 循环)."""
+        if AgentRole._DEFAULT_TIME_MANAGER is None:
+            from src.core.time_manager import TimeEventBus
+            AgentRole._DEFAULT_TIME_MANAGER = TimeEventBus()
+        return AgentRole._DEFAULT_TIME_MANAGER
+
     @property
     def time_manager(self) -> Any:
-        """获取该角色的作息时间管理器 (惰性初始化).
+        """获取该角色的作息时间管理器.
 
-        以 Tick 为单位: 1 Tick = 10 分钟, 系统启动 = Tick 0 / 第 1 天.
+        未显式绑定时返回进程级默认共享时钟; 系统装配 (AgentSystem /
+        RolePool._setup_role) 会用真正的共享实例覆盖 (bind_time_manager).
         """
         if self._time_manager is None:
-            from src.core.time_manager import TimeEventBus
-            self._time_manager = TimeEventBus()
+            self._time_manager = self._get_default_time_manager()
         return self._time_manager
 
     def bind_time_manager(self, tm: Any) -> None:
@@ -339,23 +387,6 @@ class AgentRole:
 
     # ── MCP & Python Tool Management ────────────────────────
 
-    def add_mcp_tool(
-        self,
-        name: str,
-        description: str,
-        input_schema: dict[str, Any],
-        handler: Callable[[dict[str, Any]], str],
-    ) -> None:
-        """Register a single Python/MCP tool for this role (backward-compatible).
-
-        For bulk tool registration, use add_toolkit() instead.
-        """
-        from src.core.tools import ToolRegistry
-
-        if self._tools is None:
-            self._tools = ToolRegistry()
-        self._tools.add_tool(name, description, input_schema, handler)
-
     def add_toolkit(self, toolkit: Any) -> int:
         """导入整个工具类. 参数：toolkit=ToolKit实例. 返回新增工具数（跳过重复）."""
         from src.core.tools import ToolRegistry
@@ -363,40 +394,12 @@ class AgentRole:
         if self._tools is None:
             self._tools = ToolRegistry()
 
-        # 记忆工具类自动绑定该角色的 NoteStore (内容按角色隔离) + 角色引用 (summary 后切 OFF_DUTY)
-        if toolkit.name == "memory":
-            from src.python_tools.memory_toolkit import bind_store_to_toolkit
-            bind_store_to_toolkit(toolkit, self.note_store, role=self)
-
-        # 时间工具类自动绑定该角色的 TimeEventBus (作息时间) + 角色 (休息状态)
-        if toolkit.name == "time":
-            from src.python_tools.time_toolkit import bind_time_to_toolkit
-            bind_time_to_toolkit(toolkit, self.time_manager, role=self)
-
-        # 定时任务工具类自动绑定该角色 (任务注册到共享 TimeEventBus)
-        if toolkit.name == "task":
-            from src.python_tools.task_toolkit import bind_role_to_toolkit
-            bind_role_to_toolkit(toolkit, self)
-
-        # MCP 管理工具类自动绑定该角色 (add/remove 需要知道当前角色是谁)
-        if toolkit.name == "mcp_manager":
-            from src.python_tools.mcp_manager import bind_mcp_manager_to_toolkit
-            bind_mcp_manager_to_toolkit(toolkit, self)
-
-        # 技能管理工具类自动绑定该角色 (skill_add/remove 需要知道当前角色是谁)
-        if toolkit.name == "skill_manager":
-            from src.python_tools.skill_toolkit import bind_role_to_toolkit
-            bind_role_to_toolkit(toolkit, self)
-
-        # HR 工具类自动绑定该角色 (发布招聘后新员工加入团队, 需要 RolePool 引用)
-        if toolkit.name == "hr":
-            from src.python_tools.hr_toolkit import bind_role_to_toolkit
-            bind_role_to_toolkit(toolkit, self)
-
-        # 个人电脑工具类自动绑定该角色 (run_command 等在角色自己的电脑上执行)
-        if toolkit.name == "computer":
-            from src.python_tools.computer_toolkit import bind_computer_to_toolkit
-            bind_computer_to_toolkit(toolkit, self)
+        # 按工具类名分发绑定逻辑 (holder 模式: 调用时才读角色引用, 跨线程安全).
+        # 新增工具类只需在 _toolkit_binders() 注册一行, 不用改本方法.
+        for name, binder in _toolkit_binders().items():
+            if toolkit.name == name:
+                binder(toolkit, self)
+                break
 
         return self._tools.add_toolkit(toolkit)
 
@@ -578,12 +581,34 @@ class RolePool:
             raise ValueError(f"Role '{role.role_id}' already exists")
         self._roles[role.role_id] = role
 
+    def _setup_role(self, role: AgentRole) -> None:
+        """角色装配 (唯一入口): 绑定共享时钟 → 默认工具 → 默认 MCP 组.
+
+        AgentSystem.add_role / RolePool.add_role_and_start / RolePool.start
+        全部走这里 — 避免两条装配路径漂移 (曾导致新入职角色拿到私有时钟,
+        High-1 修复). 幂等: 重复调用时 add_toolkit 按名去重, MCP 组安装幂等.
+        """
+        # 绑定共享时间源: 必须早于 add_toolkit(time), 否则 time 工具
+        # 持有角色私有/默认时钟 — get_time 永远第 1 天 Tick 0
+        if self._time_manager is not None:
+            role.bind_time_manager(self._time_manager)
+
+        # 默认工具 (memory/time/task/computer/mcp_manager/skill_manager)
+        from src.python_tools import DEFAULT_TOOLKITS
+        for factory in DEFAULT_TOOLKITS.values():
+            role.add_toolkit(factory())
+
+        # 默认 MCP 工具组 (如 file_ops 文件操作, 装到角色个人电脑)
+        from src.python_tools import DEFAULT_MCP_GROUPS, _MCP_MANAGER
+        for group in DEFAULT_MCP_GROUPS:
+            _MCP_MANAGER.install_group_defaults(role, group)
+
     def add_role_and_start(self, role: AgentRole) -> AgentRole:
         """动态入职: 注册新角色并立即启动其 worker 线程 (招聘流程用).
 
         与 add_role + start() 对单个角色的处理等价:
           1. 注册进 _roles (已存在则报错)
-          2. 装配默认工具 (memory/time/task) + talk 通信工具
+          2. _setup_role 装配 (绑定共享时钟 + 默认工具 + MCP 组)
           3. 创建 LLM 实例 (带角色前缀)
           4. 提交 worker 线程
 
@@ -597,22 +622,8 @@ class RolePool:
             raise ValueError(f"Role '{role.role_id}' already exists")
         self._roles[role.role_id] = role
 
-        # 绑定共享时间源 (High-1 修复): 新入职角色必须与团队共用同一个
-        # TimeEventBus, 否则 add_toolkit(time) 会让 time 工具持有角色私有的
-        # 未启动实例 — get_time 永远第 1 天 Tick 0, 定时任务永不触发.
-        # 必须在装配工具之前绑定.
-        if self._time_manager is not None:
-            role.bind_time_manager(self._time_manager)
-
-        # 装配默认工具 (与 AgentSystem 的 auto_toolkits 一致)
-        from src.python_tools import DEFAULT_TOOLKITS
-        for factory in DEFAULT_TOOLKITS.values():
-            role.add_toolkit(factory())
-
-        # 装配默认 MCP 工具组 (新入职员工同样自动获得, 如 file_ops)
-        from src.python_tools import DEFAULT_MCP_GROUPS, _MCP_MANAGER
-        for group in DEFAULT_MCP_GROUPS:
-            _MCP_MANAGER.install_group_defaults(role, group)
+        # 角色装配 (唯一入口, 与 AgentSystem.add_role 相同路径)
+        self._setup_role(role)
 
         # 与 start() 相同的单角色启动逻辑
         role._running = True
@@ -673,9 +684,8 @@ class RolePool:
     def start(self) -> None:
         """Launch all role worker threads."""
         for role_id, role in self._roles.items():
-            # 共享时间源存在时同样绑定 (独立使用 RolePool + start 的场景)
-            if self._time_manager is not None:
-                role.bind_time_manager(self._time_manager)
+            # 角色装配 (唯一入口; 幂等 — AgentSystem.add_role 已装配的会跳过)
+            self._setup_role(role)
             role._running = True
             role._pool = self  # back-reference for talk tool
             role._llm = DeepSeekLLM(api_key=self._llm_api_key, model=self._llm_model,

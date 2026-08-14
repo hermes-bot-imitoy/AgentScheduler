@@ -64,15 +64,19 @@
 - 定时任务：`schedule_task` 只保存任务列表；当天任务直接注册事件，隔天任务目标天上班时自动加载
 - 兼容别名 `TimeManager` 已于 2026-08 移除（commit `2953835`）——统一使用 `TimeEventBus`
 
-### 2. 事件 3 层过滤 (`src/core/event_bus.py`)
+### 2. 事件 3 层过滤 (`src/core/roles.py` — `AgentRole.evaluate_event`)
 
-0 Token 消耗拦截低价值事件：
+0 Token 消耗拦截低价值事件。**过滤是每角色独立的**（角色差异化：各自的
+`interest_keywords`/`skills`/状态），由 `EventDispatcher.trigger` 分发时调用；
+`EventBus` 只做定时事件调度表，不含过滤管线（2026-08 收敛）。
 
 | 层 | 名称 | 机制 | Token |
 |----|------|------|-------|
 | Layer 1 | State Mask | OFF_DUTY 状态拦截非 EMERGENCY 事件 | 0 |
-| Layer 2 | Salience Evaluator | 关键词匹配 + 优先级加权计算显著性 | 0 |
-| Layer 3 | Wake | 通过前两层的事件唤醒 Agent 工作流 | 按需 |
+| Layer 2 | Salience Evaluator | 角色关键词命中 + 优先级加权（`priority*0.4 + relevance*0.6`） | 0 |
+| Layer 3 | Wake | 通过前两层的事件转 Task 入该角色队列 | 按需 |
+
+系统时间事件（`source="time"`，如 SHIFT_START/END）绕过 Layer 2 直接通过。
 
 > 这部分后续可能会训练一个小模型来完成过滤，目前训练貌似没什么价值。
 
@@ -179,7 +183,7 @@ maf_scheduler/
 ├── src/
 │   ├── core/
 │   │   ├── types.py           # Event, AgentState, Priority 等数据类型
-│   │   ├── event_bus.py       # EventBus: 3 层过滤 + 事件调度表 (_tick_schedule)
+│   │   ├── event_bus.py       # EventBus: 定时事件调度表 (_tick_schedule)
 │   │   ├── time_manager.py    # TimeEventBus: 时间(时钟/Tick/天) + 事件总线 + 快进
 │   │   ├── roles.py           # AgentRole + RolePool（多角色线程池 + 动态入职/离职）
 │   │   ├── agent_system.py    # 统一管理: TimeEventBus + RolePool + 事件分发
@@ -200,9 +204,6 @@ maf_scheduler/
 │   │   ├── hr_toolkit.py      # post_job_posting (招聘即入职) / list_candidates
 │   │   ├── client_toolkit.py  # talk_to_client (甲方交流, CEO 专属)
 │   │   └── talk_toolkit.py    # talk / list_roles (角色间通信)
-│   ├── storage/
-│   │   └── ambient_buffer.py  # 潜意识事件暂存
-│   ├── workflow/              # 工作流 (预留)
 │   ├── config/
 │   │   └── mcp_group_rules.json  # MCP 服务器与工具分组配置
 │   ├── main.py                # 主入口: 多日循环 (自动进入第二天)
