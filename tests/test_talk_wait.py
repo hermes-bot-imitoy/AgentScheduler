@@ -52,6 +52,38 @@ def _wait_until(pred, timeout=5.0):
     return False
 
 
+# ── 人名暴露 (面向 LLM 的工具不暴露 role_id) ───────────────
+
+def test_roster_hides_role_id(tmp_path, monkeypatch):
+    """花名册只显示人名, 不暴露内部 role_id (索引)."""
+    monkeypatch.setattr("src.core.roles.JOURNAL_DIR", tmp_path)
+    pool = RolePool()
+    pool.add_role(AgentRole(name="张三", role_id="dev_1"))
+    pool.add_role(AgentRole(name="李四", role_id="dev_2"))
+    roster = talk_toolkit.build_team_roster(pool)
+    assert "张三" in roster and "李四" in roster
+    assert "dev_1" not in roster and "dev_2" not in roster   # role_id 不出现
+    assert "role_id" not in roster                           # 字段名也不出现
+
+
+def test_talk_by_person_name(tmp_path, monkeypatch):
+    """talk 的 target 用人名即可送达 (内部映射到 role_id)."""
+    pool, tks = _setup_roles(tmp_path, monkeypatch, "A", "B")
+    role_b = pool.get_role("B")
+    # 发送方 A 用"角色B"(人名)作 target
+    result = _talk(tks, "A", "角色B", "按名字发送测试")
+    assert "消息已发送给 角色B" in result
+    assert role_b.queue_depth == 1
+
+
+def test_talk_unknown_name_gives_hint(tmp_path, monkeypatch):
+    """target 找不到时返回错误并提示先 list_roles."""
+    pool, tks = _setup_roles(tmp_path, monkeypatch, "A", "B")
+    result = _talk(tks, "A", "不存在的名字", "hi")
+    assert "找不到" in result
+    assert "list_roles" in result
+
+
 # ── 1) wait 往返 ──────────────────────────────────────────
 
 def test_wait_roundtrip(tmp_path, monkeypatch):

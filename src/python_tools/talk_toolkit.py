@@ -30,8 +30,10 @@ TALK_WAIT_TIMEOUT = 120.0
 def build_team_roster(pool: Any) -> str:
     """构建团队花名册 (固定格式, 供 talk 描述与 list_roles 工具复用).
 
+    ⚠️ 只暴露人名: 花名册是给 LLM 看的, 内部 role_id (索引) 一律不出现.
+
     格式:
-        - **姓名** (role_id: `xxx`) -- 职责  Skills: 技能列表
+        - **姓名** -- 职责  Skills: 技能列表
 
     参数:
         pool: RolePool 实例.
@@ -40,10 +42,10 @@ def build_team_roster(pool: Any) -> str:
         花名册字符串 (每行一个成员).
     """
     roster_lines: list[str] = []
-    for rid, r in pool._roles.items():
+    for _rid, r in pool._roles.items():
         resp = r.responsibilities or r.title
         roster_lines.append(
-            f"  - **{r.name}** (role_id: `{rid}`) -- {resp}  "
+            f"  - **{r.name}** -- {resp}  "
             f"Skills: {', '.join(r.skills[:4])}"
         )
     return "\n".join(roster_lines)
@@ -126,7 +128,12 @@ def create_talk_toolkit(pool: Any) -> ToolKit:
         if not target or not message:
             return "错误: 'target' 和 'message' 为必填参数."
 
-        target_role = pool.get_role(target)
+        # target 是人名 (LLM 视角, 见 list_roles 花名册); 内部按人名→role_id
+        # 映射 (get_role_by_name 兼容 role_id 回退, 供编程直调)
+        target_role = pool.get_role_by_name(target)
+        if target_role is None:
+            return (f"错误: 团队中找不到 '{target}'。"
+                    f"请先调用 list_roles 查看当前成员姓名, 再用人名发送。")
         urgency = getattr(Urgency, urgency_str.upper(), Urgency.NORMAL)
         sender = getattr(tk, "_role_holder", None)
         sender = sender.get("role") if sender is not None else None
@@ -204,7 +211,7 @@ def create_talk_toolkit(pool: Any) -> ToolKit:
             "给团队成员发送消息或委托任务. "
             "团队当前有哪些成员请先调用 list_roles 获取 (名单是动态的, 可能有新入职). "
             "根据每个人的职责选择合适的人选后, 用 target 发送.\n"
-            "target 参数使用 role_id.\n"
+            "target 参数使用成员姓名 (见 list_roles 花名册, 例如 '王建国').\n"
             "wait=true 表示需要对方回复后才能继续 (同步等待): 你会进入 WAIT 状态, "
             "对方会用 talk 工具回复你, 收到回复后工具返回回复内容并恢复原状态. "
             "等待上限 120 秒, 超时会返回错误. 仅在确实需要对方答案才能继续时才用 wait=true; "
@@ -215,7 +222,7 @@ def create_talk_toolkit(pool: Any) -> ToolKit:
             "properties": {
                 "target": {
                     "type": "string",
-                    "description": "目标人员的 role_id (团队名单请先通过 list_roles 获取)",
+                    "description": "目标成员姓名 (团队名单请先通过 list_roles 获取, 花名册里的姓名)",
                 },
                 "message": {
                     "type": "string",
@@ -239,8 +246,9 @@ def create_talk_toolkit(pool: Any) -> ToolKit:
     tk.add_python_tool(
         name="list_roles",
         description=(
-            "获取当前团队都有哪些角色 (姓名/role_id/职责/技能). "
-            "在向同事发消息前, 或不确定该找谁处理某件事时, 先调用此工具查看团队成员."
+            "获取当前团队都有哪些成员 (姓名/职责/技能). "
+            "在向同事发消息前, 或不确定该找谁处理某件事时, 先调用此工具查看团队成员, "
+            "然后用 talk 给对应姓名发消息."
         ),
         input_schema={"type": "object", "properties": {}},
         handler=_list_roles_handler,

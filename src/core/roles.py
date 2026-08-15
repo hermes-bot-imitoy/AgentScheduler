@@ -774,6 +774,24 @@ class RolePool:
             raise KeyError(f"Role '{name}' not found. Available: {list(self._roles)}")
         return self._roles[name]
 
+    def get_role_by_name(self, name: str) -> Optional[AgentRole]:
+        """按人名查找角色 (talk 工具用); 兼容按 role_id 回退.
+
+        面向 LLM 的通信工具只暴露人名 (花名册不含 id), 内部仍以 role_id
+        为索引。name 先按人名精确匹配 (模板保证人名全局唯一), 未命中再按
+        role_id 回退 (编程直调/旧调用兼容)。
+
+        参数:
+            name: 人名 (LLM 视角) 或 role_id (内部兼容).
+
+        返回:
+            角色实例, 未找到返回 None.
+        """
+        for r in self._roles.values():
+            if r.name == name:
+                return r
+        return self._roles.get(name)
+
     def remove_role(self, role_id: str) -> bool:
         """离职: 移除角色并关闭其个人电脑.
 
