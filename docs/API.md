@@ -217,10 +217,10 @@ NoteStore(base_dir="./data/notes", role_id="", computer=None)
 **交流**: `talk_to(target, message, urgency="NORMAL") -> str`（编程式跨角色消息）。
 
 ### `RolePool`
-多角色并发管理，**每角色独立线程 + 独立锁 + 独立 DeepSeekLLM**。
+多角色并发管理，**每角色独立线程 + 独立锁 + 独立 LLM 客户端**（默认 DeepSeekLLM，`llm_provider="ollama"` 时用本地 OllamaLLM）。
 
 ```python
-RolePool(llm_api_key=None, llm_model=None)
+RolePool(llm_api_key=None, llm_model=None, llm_provider=None)  # llm_provider 默认读环境变量 LLM_PROVIDER
 ```
 
 | 方法 | 参数 | 返回 | 说明 |
@@ -433,14 +433,17 @@ loader.close()
 
 ```python
 DeepSeekLLM(api_key=None, model=None)   # 默认从环境变量 DEEPSEEK_API_KEY / DEEPSEEK_MODEL
+OllamaLLM(model=None)                   # 本地 Ollama, 默认 gemma4:e2b-it-q4_K_M, 免 API Key
 ```
 
 | 方法 | 参数 | 返回 |
 |------|------|------|
 | `chat(system, user, max_tokens=512)` | str, str, int | `(text, tokens)` |
 | `summarize(text)` | str | `(summary, tokens)` |
+| `chat_with_tools(messages, tools)` | list, list | `(content, tool_calls, usage)` |
 
-环境变量: `DEEPSEEK_API_KEY`（必填）、`DEEPSEEK_MODEL`（默认 deepseek-v4-flash）、`DEEPSEEK_THINKING`（默认 true，思考模式）。
+环境变量: `DEEPSEEK_API_KEY`（必填）、`DEEPSEEK_MODEL`（默认 deepseek-v4-flash）、`DEEPSEEK_THINKING`（默认 true，思考模式）;
+`LLM_PROVIDER`（deepseek/ollama，切换后端）、`OLLAMA_BASE_URL`（默认 http://localhost:11434）、`OLLAMA_MODEL`（默认 gemma4:e2b-it-q4_K_M）。
 
 ---
 

@@ -318,3 +318,21 @@ print(dev._tools.call_tool("lan_devices", {}))
 | DEEPSEEK_MODEL | deepseek-v4-flash | 模型名称 |
 | DEEPSEEK_THINKING | true | 是否启用思考模式 |
 | DEEPSEEK_BASE_URL | https://api.deepseek.com | API 地址 |
+| LLM_PROVIDER | deepseek | LLM 后端: `deepseek` (云端) / `ollama` (本地) |
+| OLLAMA_BASE_URL | http://localhost:11434 | Ollama 服务地址 (OpenAI 兼容端点) |
+| OLLAMA_MODEL | gemma4:e2b-it-q4_K_M | 本地 Ollama 模型标签 |
+
+### 使用本地 Ollama 模型
+
+项目默认走 DeepSeek 云端 API。要改用本地 Ollama (OpenAI 兼容端点, 免 API Key),
+设置环境变量后照常运行即可, 角色线程与招聘流程 (`RolePool`/`RoleFactory`) 会自动
+切换到 `OllamaLLM`:
+
+```bash
+export LLM_PROVIDER=ollama                     # 全局切换后端
+export OLLAMA_MODEL=gemma4:e2b-it-q4_K_M       # 默认即此, 可省略
+ollama serve                                    # 确保本地服务在跑
+python src/role_demo.py                         # 示例: 多角色系统全走本地模型
+```
+
+也可代码级指定: `RolePool(llm_provider="ollama")` 或 `RoleFactory(provider="ollama")`。

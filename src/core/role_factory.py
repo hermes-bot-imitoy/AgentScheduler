@@ -15,7 +15,7 @@ import os
 import re
 from typing import Any, Optional
 
-from src.core.llm import DeepSeekLLM
+from src.core.llm import DeepSeekLLM, OllamaLLM
 from src.core.role_templates import TEMPLATES, _next_name, add_template
 from src.core.roles import AgentRole
 
@@ -65,8 +65,14 @@ class RoleFactory:
         self,
         api_key: Optional[str] = None,
         model: Optional[str] = None,
+        provider: Optional[str] = None,
     ):
-        self._llm = DeepSeekLLM(api_key=api_key, model=model, label="role_factory")
+        # LLM 后端: deepseek (云端) / ollama (本地), 默认读环境变量 LLM_PROVIDER
+        provider = provider or os.environ.get("LLM_PROVIDER", "deepseek")
+        if provider == "ollama":
+            self._llm = OllamaLLM(model=model, label="role_factory")
+        else:
+            self._llm = DeepSeekLLM(api_key=api_key, model=model, label="role_factory")
 
     def create_role(self, requirement: str) -> AgentRole:
         """Create a new role from a hiring requirement description.

@@ -15,6 +15,7 @@ from __future__ import annotations
 import heapq
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -24,7 +25,7 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Any, Callable, Optional
 
-from src.core.llm import DeepSeekLLM
+from src.core.llm import DeepSeekLLM, OllamaLLM
 from src.core.types import AgentState, Event, Priority
 
 logger = logging.getLogger(__name__)
@@ -139,7 +140,7 @@ class AgentRole:
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, init=False)
     _current_task: Optional[Task] = field(default=None, repr=False, init=False)
     _running: bool = field(default=True, repr=False, init=False)
-    _llm: Optional[DeepSeekLLM] = field(default=None, repr=False, init=False)
+    _llm: Optional[Any] = field(default=None, repr=False, init=False)  # LLM 客户端 (DeepSeekLLM/OllamaLLM), lazy init
     _tools: Any = field(default=None, repr=False, init=False)  # ToolRegistry, lazy init
     _pool: Any = field(default=None, repr=False, init=False)   # RolePool back-reference for talk
     _note_store: Any = field(default=None, repr=False, init=False)  # NoteStore, lazy init
@@ -562,13 +563,15 @@ class RolePool:
     """
 
     def __init__(self, llm_api_key: Optional[str] = None, llm_model: Optional[str] = None,
-                 time_manager: Any = None):
+                 llm_provider: Optional[str] = None, time_manager: Any = None):
         self._roles: dict[str, AgentRole] = {}
         self._executor = ThreadPoolExecutor(thread_name_prefix="role-")
         self._futures: dict[str, Future] = {}
         self._shutdown_flag = threading.Event()
         self._llm_api_key = llm_api_key
         self._llm_model = llm_model
+        # LLM 后端: deepseek (云端) / ollama (本地), 默认读环境变量 LLM_PROVIDER
+        self._llm_provider = llm_provider or os.environ.get("LLM_PROVIDER", "deepseek")
         # 共享时间源 (AgentSystem 注入). 招聘入职 (add_role_and_start) 时
         # 绑定给新角色, 否则新员工拿到的是私有未启动的 TimeEventBus (永远第 1 天).
         self._time_manager = time_manager
@@ -603,6 +606,20 @@ class RolePool:
         for group in DEFAULT_MCP_GROUPS:
             _MCP_MANAGER.install_group_defaults(role, group)
 
+    def _new_llm(self, role_id: str) -> Any:
+        """按 llm_provider 创建角色 LLM 客户端 (带角色日志前缀).
+
+        deepseek = 云端 DeepSeekLLM (需要 API Key); ollama = 本地
+        OllamaLLM (免 Key, OpenAI 兼容端点). 新增后端只需在此加分支.
+
+        参数:
+            role_id: 角色 ID, 作为 LLM 的 label (DEBUG 日志区分是谁在调 API).
+        """
+        if self._llm_provider == "ollama":
+            return OllamaLLM(model=self._llm_model, label=role_id)
+        return DeepSeekLLM(api_key=self._llm_api_key, model=self._llm_model,
+                           label=role_id)  # DEBUG 日志带角色前缀
+
     def add_role_and_start(self, role: AgentRole) -> AgentRole:
         """动态入职: 注册新角色并立即启动其 worker 线程 (招聘流程用).
 
@@ -628,8 +645,7 @@ class RolePool:
         # 与 start() 相同的单角色启动逻辑
         role._running = True
         role._pool = self  # back-reference for talk tool
-        role._llm = DeepSeekLLM(api_key=self._llm_api_key, model=self._llm_model,
-                                label=role.role_id)  # DEBUG 日志带角色前缀
+        role._llm = self._new_llm(role.role_id)
         role._register_talk_tool()  # auto-register inter-role communication
         fut = self._executor.submit(self._role_loop, role)
         self._futures[role.role_id] = fut
@@ -688,8 +704,7 @@ class RolePool:
             self._setup_role(role)
             role._running = True
             role._pool = self  # back-reference for talk tool
-            role._llm = DeepSeekLLM(api_key=self._llm_api_key, model=self._llm_model,
-                                    label=role.role_id)  # DEBUG 日志带角色前缀
+            role._llm = self._new_llm(role.role_id)
             role._register_talk_tool()  # auto-register inter-role communication
             fut = self._executor.submit(self._role_loop, role)
             self._futures[role_id] = fut

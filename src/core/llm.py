@@ -1,10 +1,15 @@
-"""DeepSeek LLM Client — 真实 AI 后端接入.
+"""LLM 客户端 — DeepSeek 云端 / 本地 Ollama 真实 AI 后端接入.
 
-DeepSeek V4 Flash with optional thinking (reasoning) mode.
-OpenAI-compatible API: chat(system, user) → (response_text, tokens_consumed).
+两个后端都走 OpenAI 兼容的 chat/completions 接口 (OpenAI 格式):
+  - DeepSeekLLM: DeepSeek V4 Flash, 可选 thinking (推理) 模式, 需 API Key.
+  - OllamaLLM:   本地 Ollama 服务, 默认 gemma4:e2b-it-q4_K_M, 免 API Key.
 
-Thinking mode: set DEEPSEEK_THINKING=true or pass thinking=True.
-When enabled, DeepSeek returns reasoning_content before the final answer.
+公共接口 (与 MockLLM 同形):
+  - chat(system, user) → (response_text, tokens_consumed)
+  - summarize(log_text) → (summary_text, tokens_consumed)
+  - chat_with_tools(messages, tools) → (content, raw_tool_calls, usage) 原生 function calling
+
+切换后端: 环境变量 LLM_PROVIDER=deepseek|ollama (见 roles.RolePool / role_factory.RoleFactory).
 """
 
 from __future__ import annotations
@@ -19,46 +24,73 @@ logger = logging.getLogger(__name__)
 
 # ── Configuration ──────────────────────────────────────────
 
+# DeepSeek 云端
 DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash")
 DEEPSEEK_THINKING = os.environ.get("DEEPSEEK_THINKING", "true").lower() in ("1", "true", "yes", "on")
 
+# 本地 Ollama (OpenAI 兼容端点, 免 API Key)
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma4:e2b-it-q4_K_M")
+
 DEFAULT_MAX_TOKENS = 512
 DEFAULT_TEMPERATURE = 0.7
 
 
-# # DeepSeek API客户端, 支持思维链(thinking)模式. 参数: api_key, base_url, model, thinking
-class DeepSeekLLM:
-    """Real DeepSeek API client with optional thinking (chain-of-thought) mode.
+# ── 共享基类: OpenAI 兼容客户端 ─────────────────────────────
 
-    Usage:
-        llm = DeepSeekLLM(api_key="sk-...")
-        # Thinking mode via env: DEEPSEEK_THINKING=true
-        # or constructor: DeepSeekLLM(thinking=True)
-        text, tokens = llm.chat(system="You are helpful.", user="Hello")
-        text, tokens = llm.summarize(log_text="...")
+class OpenAICompatLLM:
+    """OpenAI 兼容 chat/completions 客户端基类 (DeepSeek/Ollama 共用).
+
+    两个后端协议完全一致 (OpenAI 格式), 差异只有:
+      环境变量名 / 默认模型 / 是否需要 API Key / 是否注入 thinking 参数.
+
+    子类覆盖类属性即可, 无需重写请求逻辑:
+      API_NAME        日志前缀 (如 "DeepSeek" / "Ollama")
+      API_KEY_ENV     读取 API Key 的环境变量名 (空串 = 不需要 Key)
+      BASE_URL_ENV    读取服务地址的环境变量名
+      MODEL_ENV       读取模型名的环境变量名
+      DEFAULT_BASE_URL 默认服务地址
+      DEFAULT_MODEL    默认模型名
+      REQUIRES_API_KEY 是否强制要求 API Key (缺失时抛 ValueError)
+
+    参数:
+        api_key: API 密钥 (可选; Ollama 免 Key, 传空则不携带 Authorization 头).
+        base_url: 服务地址 (默认读环境变量, 再回落到类默认值).
+        model: 模型名称 (同上).
+        label: 角色标识, DEBUG 日志前缀, 便于多角色并发时区分是谁在调 API.
     """
+
+    API_NAME = "LLM"
+    API_KEY_ENV = ""
+    BASE_URL_ENV = ""
+    MODEL_ENV = ""
+    DEFAULT_BASE_URL = ""
+    DEFAULT_MODEL = ""
+    REQUIRES_API_KEY = False
 
     def __init__(
         self,
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         model: Optional[str] = None,
-        thinking: Optional[bool] = None,
         label: Optional[str] = None,
     ):
-        self.api_key = api_key or DEEPSEEK_API_KEY
-        self.base_url = (base_url or DEEPSEEK_BASE_URL).rstrip("/")
-        self.model = model or DEEPSEEK_MODEL
-        self.thinking = thinking if thinking is not None else DEEPSEEK_THINKING
+        self.api_key = api_key if api_key is not None else (
+            os.environ.get(self.API_KEY_ENV, "") if self.API_KEY_ENV else ""
+        )
+        self.base_url = (
+            base_url or os.environ.get(self.BASE_URL_ENV, self.DEFAULT_BASE_URL)
+        ).rstrip("/")
+        self.model = model or os.environ.get(self.MODEL_ENV, self.DEFAULT_MODEL)
         # 角色标识: DEBUG 日志前缀, 便于多角色并发时区分是谁在调 API
         self.label = label or ""
 
-        if not self.api_key:
+        if self.REQUIRES_API_KEY and not self.api_key:
             raise ValueError(
-                "DeepSeek API key is required. Set DEEPSEEK_API_KEY env var "
-                "or pass api_key= to DeepSeekLLM()."
+                f"{self.API_NAME} API key is required. Set {self.API_KEY_ENV} env var "
+                f"or pass api_key= to {self.__class__.__name__}()."
             )
 
     # ── 调试日志 (带角色前缀) ─────────────────────────────
@@ -73,7 +105,6 @@ class DeepSeekLLM:
 
     # ── Public API (same interface as MockLLM) ─────────────
 
-# # 发送聊天请求. 返回(回复文本, Token数). 参数: system=系统提示, user=用户输入
     def chat(
         self,
         system: str,
@@ -81,7 +112,14 @@ class DeepSeekLLM:
         temperature: float = DEFAULT_TEMPERATURE,
         max_tokens: int = DEFAULT_MAX_TOKENS,
     ) -> tuple[str, int]:
-        """Send a chat request and return (response_text, tokens_consumed)."""
+        """发送聊天请求. 返回(回复文本, Token数).
+
+        参数:
+            system: 系统提示词.
+            user: 用户输入.
+            temperature: 采样温度.
+            max_tokens: 最大输出 token 数.
+        """
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
@@ -95,14 +133,19 @@ class DeepSeekLLM:
         tokens = usage.get("total_tokens", 0) if usage else 0
         return response_text, tokens
 
-# # 从日志/文本生成简洁总结. 返回(总结文本, Token数)
     def summarize(
         self,
         log_text: str,
         temperature: float = 0.3,
         max_tokens: int = 256,
     ) -> tuple[str, int]:
-        """Generate a concise summary from a log/text block."""
+        """从日志/文本生成简洁总结. 返回(总结文本, Token数).
+
+        参数:
+            log_text: 待总结的日志/文本块.
+            temperature: 采样温度 (总结任务偏低).
+            max_tokens: 最大输出 token 数.
+        """
         messages = [
             {
                 "role": "system",
@@ -123,42 +166,43 @@ class DeepSeekLLM:
 
     # ── Internal ───────────────────────────────────────────
 
-# # 核心API调用. 返回(回复文本, usage字典). thinking模式自动启用推理并提取reasoning_content
+    def _extra_payload(self, payload: dict, max_tokens: Optional[int]) -> None:
+        """子类钩子: 在发送前向 payload 注入私有参数 (基类默认不注入).
+
+        参数:
+            payload: 即将发送的请求体 (已含 model/messages/temperature 等).
+            max_tokens: 调用方传入的 max_tokens 原始值 (None = 未显式限制).
+        """
+        return
+
     def _call_api(
         self,
         messages: list[dict[str, str]],
         temperature: float,
         max_tokens: int,
     ) -> tuple[str, Optional[dict]]:
-        """Core API call. Returns (content_text, usage_dict).
+        """核心 API 调用. 返回 (content_text, usage_dict).
 
-        When thinking mode is enabled, DeepSeek returns reasoning_content
-        before the final content. We include reasoning in debug logs but
-        return only the final content to the caller.
+        请求 OpenAI 兼容 /v1/chat/completions 端点. 推理内容兼容两个
+        字段名: reasoning_content (DeepSeek) 与 reasoning (Ollama).
+        API 超时/异常时返回 "[API timeout]" / "[API error: ...]" 错误文本
+        (roles.py 的 LLM_ERROR_MARKERS 据此把任务标记为失败).
         """
         url = f"{self.base_url}/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
         payload: dict = {
             "model": self.model,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
-
-        # Enable thinking mode for deepseek-v4-flash and compatible models
-        if self.thinking:
-            payload["thinking"] = {"type": "enabled"}
-            # When thinking is enabled, max_tokens must be >= thinking budget
-            # Set a higher default to leave room for reasoning
-            if max_tokens < 1024:
-                payload["max_tokens"] = 1024
+        self._extra_payload(payload, max_tokens)
 
         self._debug(
-            "DeepSeek API call: model=%s messages=%d thinking=%s",
-            self.model, len(messages), self.thinking,
+            "%s API call: model=%s messages=%d",
+            self.API_NAME, self.model, len(messages),
         )
 
         try:
@@ -166,41 +210,43 @@ class DeepSeekLLM:
             resp.raise_for_status()
             data = resp.json()
         except requests.exceptions.Timeout:
-            logger.error("DeepSeek API timeout")
+            logger.error("%s API timeout", self.API_NAME)
             return "[API timeout]", None
         except requests.exceptions.RequestException as e:
-            logger.error("DeepSeek API error: %s", e)
+            logger.error("%s API error: %s", self.API_NAME, e)
             return f"[API error: {e}]", None
 
         choice = data.get("choices", [{}])[0]
         message = choice.get("message", {})
 
-        # Extract content — if thinking is enabled, reasoning_content is separate
-        content = message.get("content", "")
-        reasoning = message.get("reasoning_content", "")
+        # 提取正文; 若后端开了推理, reasoning_content (DeepSeek) 或
+        # reasoning (Ollama) 里是思考过程, 只进 DEBUG 日志, 不返回给调用方
+        content = message.get("content", "") or ""
+        reasoning = message.get("reasoning_content") or message.get("reasoning") or ""
 
         if reasoning:
-            self._debug("DeepSeek reasoning (%d chars): %s",
-                        len(reasoning), reasoning)
+            self._debug("%s reasoning (%d chars): %s",
+                        self.API_NAME, len(reasoning), reasoning)
 
-        # If content is empty but thinking was enabled, the model might have
-        # put everything in reasoning_content (edge case)
+        # 正文为空但推理非空 (边缘情况): 退回推理内容, 避免空答复
         if not content and reasoning:
-            logger.warning("DeepSeek: empty content, falling back to reasoning_content")
+            logger.warning("%s: empty content, falling back to reasoning_content",
+                           self.API_NAME)
             content = reasoning
 
         usage = data.get("usage")
 
         if not content:
-            logger.warning("DeepSeek returned empty content. Raw: %s", str(data)[:200])
+            logger.warning("%s returned empty content. Raw: %s",
+                           self.API_NAME, str(data)[:200])
 
-        # Log token breakdown when thinking is on
-        if usage and self.thinking:
+        # Token 明细日志 (调试用)
+        if usage:
             self._debug(
-                "DeepSeek tokens: prompt=%s completion=%s reasoning=%s total=%s",
+                "%s tokens: prompt=%s completion=%s total=%s",
+                self.API_NAME,
                 usage.get("prompt_tokens", "?"),
                 usage.get("completion_tokens", "?"),
-                usage.get("completion_tokens_details", {}).get("reasoning_tokens", "?"),
                 usage.get("total_tokens", "?"),
             )
 
@@ -230,10 +276,9 @@ class DeepSeekLLM:
             id/type/function{name,arguments}); 无工具调用时为 [].
         """
         url = f"{self.base_url}/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
         # 无上限: max_tokens=None 时不传该字段 (由模型决定最大输出, 避免
         # 长内容 JSON 被 1024 token 截断 → 非法 JSON 死循环). 上限限制以后再加.
         payload: dict = {
@@ -245,18 +290,11 @@ class DeepSeekLLM:
         }
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
-
-        # 与 chat() 相同的 thinking 模式处理
-        if self.thinking:
-            payload["thinking"] = {"type": "enabled"}
-            # thinking 模式下 DeepSeek 要求 max_tokens >= 1024;
-            # 未显式指定时给个足够大的值 (输出无实际截断感)
-            if max_tokens is not None and max_tokens < 1024:
-                payload["max_tokens"] = 1024
+        self._extra_payload(payload, max_tokens)
 
         self._debug(
-            "DeepSeek API call (tools): model=%s messages=%d tools=%d thinking=%s",
-            self.model, len(messages), len(tools), self.thinking,
+            "%s API call (tools): model=%s messages=%d tools=%d",
+            self.API_NAME, self.model, len(messages), len(tools),
         )
 
         try:
@@ -264,38 +302,122 @@ class DeepSeekLLM:
             resp.raise_for_status()
             data = resp.json()
         except requests.exceptions.Timeout:
-            logger.error("DeepSeek API timeout")
+            logger.error("%s API timeout", self.API_NAME)
             return "[API timeout]", [], None
         except requests.exceptions.RequestException as e:
-            logger.error("DeepSeek API error: %s", e)
+            logger.error("%s API error: %s", self.API_NAME, e)
             return f"[API error: {e}]", [], None
 
         choice = data.get("choices", [{}])[0]
         message = choice.get("message", {})
 
         content = message.get("content") or ""
-        reasoning = message.get("reasoning_content", "")
+        reasoning = message.get("reasoning_content") or message.get("reasoning") or ""
         raw_calls = message.get("tool_calls") or []
 
         if reasoning:
-            self._debug("DeepSeek reasoning (%d chars): %s",
-                        len(reasoning), reasoning)
+            self._debug("%s reasoning (%d chars): %s",
+                        self.API_NAME, len(reasoning), reasoning)
 
-        # 原生工具调用: content 可能为空 (推理全在 reasoning_content),
+        # 原生工具调用: content 可能为空 (推理全在 reasoning 字段),
         # 有 tool_calls 时以 tool_calls 为准, 不回退到 reasoning 当正文
         if not content and reasoning and not raw_calls:
-            logger.warning("DeepSeek: empty content, falling back to reasoning_content")
+            logger.warning("%s: empty content, falling back to reasoning_content",
+                           self.API_NAME)
             content = reasoning
 
         usage = data.get("usage")
 
-        if usage and self.thinking:
+        if usage:
             self._debug(
-                "DeepSeek tokens: prompt=%s completion=%s reasoning=%s total=%s",
+                "%s tokens: prompt=%s completion=%s total=%s",
+                self.API_NAME,
                 usage.get("prompt_tokens", "?"),
                 usage.get("completion_tokens", "?"),
-                usage.get("completion_tokens_details", {}).get("reasoning_tokens", "?"),
                 usage.get("total_tokens", "?"),
             )
 
         return content, raw_calls, usage
+
+
+# ── DeepSeek 云端 ──────────────────────────────────────────
+
+class DeepSeekLLM(OpenAICompatLLM):
+    """DeepSeek API 客户端, 支持思维链 (thinking) 模式.
+
+    用法:
+        llm = DeepSeekLLM(api_key="sk-...")
+        # Thinking 模式: 环境变量 DEEPSEEK_THINKING=true 或 DeepSeekLLM(thinking=True)
+        text, tokens = llm.chat(system="You are helpful.", user="Hello")
+        text, tokens = llm.summarize(log_text="...")
+
+    参数:
+        api_key: DeepSeek API 密钥 (默认读 DEEPSEEK_API_KEY).
+        base_url: API 地址 (默认 DEEPSEEK_BASE_URL).
+        model: 模型名称 (默认 DEEPSEEK_MODEL).
+        thinking: 是否启用思考模式 (None = 读环境变量 DEEPSEEK_THINKING).
+        label: 角色标识 (DEBUG 日志前缀).
+    """
+
+    API_NAME = "DeepSeek"
+    API_KEY_ENV = "DEEPSEEK_API_KEY"
+    BASE_URL_ENV = "DEEPSEEK_BASE_URL"
+    MODEL_ENV = "DEEPSEEK_MODEL"
+    DEFAULT_BASE_URL = "https://api.deepseek.com"
+    DEFAULT_MODEL = "deepseek-v4-flash"
+    REQUIRES_API_KEY = True
+
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        model: Optional[str] = None,
+        thinking: Optional[bool] = None,
+        label: Optional[str] = None,
+    ):
+        super().__init__(api_key=api_key, base_url=base_url, model=model, label=label)
+        # 思考模式: 显式传参优先, 否则读环境变量 (默认开)
+        self.thinking = thinking if thinking is not None else DEEPSEEK_THINKING
+
+    def _extra_payload(self, payload: dict, max_tokens: Optional[int]) -> None:
+        """DeepSeek: thinking 开启时注入 thinking 参数, 并保证 max_tokens >= 1024.
+
+        推理预算需要额外 token 空间; 显式 max_tokens 过小会截断思考过程.
+        """
+        if not self.thinking:
+            return
+        payload["thinking"] = {"type": "enabled"}
+        cur = payload.get("max_tokens")
+        if cur is not None and cur < 1024:
+            payload["max_tokens"] = 1024
+
+
+# ── 本地 Ollama ────────────────────────────────────────────
+
+class OllamaLLM(OpenAICompatLLM):
+    """本地 Ollama 客户端 (OpenAI 兼容端点, 免 API Key).
+
+    用法:
+        llm = OllamaLLM()   # 默认连接本地 http://localhost:11434 的 gemma4:e2b-it-q4_K_M
+        text, tokens = llm.chat(system="You are helpful.", user="Hello")
+        content, raw_calls, usage = llm.chat_with_tools(messages, tools)
+
+    说明:
+        Ollama 的 /v1/chat/completions 与 OpenAI 格式一致, 无需鉴权
+        (不携带 Authorization 头). 模型默认不强制开 thinking — 保持
+        普通对话低延迟; 推理模型若要思考过程, 由 Ollama 侧自行处理.
+
+    参数:
+        api_key: 兼容参数, 一般留空 (传了也会作为 Bearer 头发送).
+        base_url: Ollama 服务地址 (默认 OLLAMA_BASE_URL = http://localhost:11434).
+        model: 模型标签 (默认 OLLAMA_MODEL = gemma4:e2b-it-q4_K_M).
+        label: 角色标识 (DEBUG 日志前缀).
+    """
+
+    API_NAME = "Ollama"
+    API_KEY_ENV = ""
+    BASE_URL_ENV = "OLLAMA_BASE_URL"
+    MODEL_ENV = "OLLAMA_MODEL"
+    DEFAULT_BASE_URL = "http://localhost:11434"
+    DEFAULT_MODEL = "gemma4:e2b-it-q4_K_M"
+    REQUIRES_API_KEY = False
