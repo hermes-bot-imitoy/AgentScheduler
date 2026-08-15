@@ -156,6 +156,12 @@ class AgentRole:
     _time_manager: Any = field(default=None, repr=False, init=False)  # TimeEventBus, lazy init
     _computer: Any = field(default=None, repr=False, init=False)  # Computer, lazy init (角色添加时自动创建)
 
+    # ── talk wait=true 同步等待回复状态 ───────────────────
+    _waiting_reply_from: Optional[str] = field(default=None, repr=False, init=False)  # WAIT: 在等谁的 talk 回复
+    _reply_cond: Any = field(default_factory=threading.Condition, repr=False, init=False)  # 回复条件变量 (唤醒等待线程)
+    _reply_box: Optional[str] = field(default=None, repr=False, init=False)  # 收到的回复内容
+    _state_before_wait: Optional[AgentState] = field(default=None, repr=False, init=False)  # 进入 WAIT 前的状态
+
     # Callbacks
     on_task_start: Optional[Callable[[AgentRole, Task], None]] = field(default=None, repr=False, init=False)
     on_task_done: Optional[Callable[[AgentRole, Task], None]] = field(default=None, repr=False, init=False)
@@ -171,7 +177,9 @@ class AgentRole:
         Layer 3: PASS if score >= threshold
         """
         # Layer 1: State Mask
-        if self.state in (AgentState.OFF_DUTY, AgentState.WRAPPING_UP):
+        # WAIT 与 OFF_DUTY 同等对待: 同步等待回复期间不接非紧急事件
+        # (talk 消息例外 — 直接入队不走本过滤, 由回复投递逻辑处理)
+        if self.state in (AgentState.OFF_DUTY, AgentState.WRAPPING_UP, AgentState.WAIT):
             if event.priority < Priority.EMERGENCY:
                 return False, f"Role {self.name} is {self.state.value}"
 
@@ -481,6 +489,61 @@ class AgentRole:
             "message": message,
             "urgency": urgency,
         }).content[0].text
+
+    # ── talk wait=true 同步等待回复 ───────────────────────
+
+    def _begin_wait(self, target_id: str) -> None:
+        """进入 WAIT 状态: 记录原状态, 标记在等 target_id 的 talk 回复.
+
+        参数:
+            target_id: 正在等待其回复的角色 role_id.
+        """
+        self._waiting_reply_from = target_id
+        self._state_before_wait = self.state
+        self._reply_box = None  # 清空历史回复, 避免误读上一次等待的残留
+        self.state = AgentState.WAIT
+        self.journal(f"进入 WAIT, 等待 {target_id} 回复")
+
+    def _wait_for_reply(self, timeout: float) -> Optional[str]:
+        """阻塞等待回复 (最多 timeout 秒).
+
+        由目标角色的 talk 回复经 _deliver_reply 唤醒; 超时返回 None.
+
+        参数:
+            timeout: 最长等待秒数.
+
+        返回:
+            回复内容, 超时未收到返回 None.
+        """
+        with self._reply_cond:
+            # 先查信箱: 防止回复在 wait() 之前到达 (notify 先于 wait 丢失唤醒)
+            if self._reply_box is not None:
+                return self._reply_box
+            self._reply_cond.wait(timeout)
+            return self._reply_box
+
+    def _end_wait(self) -> None:
+        """结束 WAIT: 清空等待状态, 恢复进入 WAIT 前的状态.
+
+        幂等; 若等待期间状态被外部修改 (如 SHIFT_START 置 ON_DUTY_IDLE),
+        则以当前状态为准 (不强行覆盖外部变更).
+        """
+        self._waiting_reply_from = None
+        self._reply_box = None
+        if self._state_before_wait is not None and self.state == AgentState.WAIT:
+            self.state = self._state_before_wait
+        self._state_before_wait = None
+        self.journal("WAIT 结束, 状态已恢复")
+
+    def _deliver_reply(self, content: str) -> None:
+        """投递 talk 回复给处于 WAIT 的等待者 (唤醒其阻塞的 worker 线程).
+
+        参数:
+            content: 回复内容.
+        """
+        with self._reply_cond:
+            self._reply_box = content
+            self._reply_cond.notify_all()
 
     # ── Tool-calling LLM execution ─────────────────────────
 

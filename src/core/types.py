@@ -11,13 +11,14 @@ from typing import Any, Optional
 
 # ── Enums ────────────────────────────────────────────────────
 
-# # Agent 生命周期状态枚举: OFF_DUTY(下班), ON_DUTY_IDLE(空闲), ON_DUTY_BUSY(忙碌), WRAPPING_UP(收尾)
+# # Agent 生命周期状态枚举: OFF_DUTY(下班), ON_DUTY_IDLE(空闲), ON_DUTY_BUSY(忙碌), WRAPPING_UP(收尾), WAIT(等待回复)
 class AgentState(str, Enum):
     """Agent lifecycle states."""
     OFF_DUTY      = "OFF_DUTY"       # 下班 — context flushed, not processing
     ON_DUTY_IDLE  = "ON_DUTY_IDLE"   # 上班空闲 — alive, listening for events
     ON_DUTY_BUSY  = "ON_DUTY_BUSY"   # 上班忙碌 — executing a workflow
     WRAPPING_UP   = "WRAPPING_UP"    # 收尾中 — finishing last task before shift end
+    WAIT          = "WAIT"           # 等待中 — talk wait=true 同步等待对方回复 (worker 阻塞)
 
 
 # # 事件优先级: 数值越大越紧急. LOW=1, NORMAL=3, HIGH=6, EMERGENCY=10

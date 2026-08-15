@@ -1,0 +1,164 @@
+"""talk 工具 wait=true 同步等待回复测试.
+
+覆盖:
+  - wait 往返: A wait B → B 回复 → A 收到回复并恢复原状态
+  - 双向互等拆解: A 等 B 时 B 再 wait A → 直接作为回复投递, B 不进入等待
+  - 环形等待拒绝: A 等 B, B 等 C, C 等 A → 再发起 wait 被拒绝 (防死锁)
+  - 超时: 对方不回复 → 超时返回错误文本, 状态恢复
+  - 非等待对象消息: 他人发给 WAIT 角色 → 正常入队, 不误投递为回复
+
+注: 直接调用 talk 处理器闭包 (与 ToolRegistry.call_tool 走同一逻辑),
+绕过 TextContent 包装层 — 该层与等待语义无关, 且依赖 mcp 版本.
+"""
+
+from __future__ import annotations
+
+import threading
+import time
+
+from src.core.roles import AgentRole, RolePool
+from src.python_tools import talk_toolkit
+from src.python_tools.talk_toolkit import create_talk_toolkit
+
+
+def _setup_roles(tmp_path, monkeypatch, *role_ids):
+    """构造若干角色 + 各自的 talk 工具类, 返回 (pool, {rid: toolkit})."""
+    monkeypatch.setattr("src.core.roles.JOURNAL_DIR", tmp_path)
+    pool = RolePool()
+    toolkits = {}
+    for rid in role_ids:
+        role = AgentRole(name=f"角色{rid}", role_id=rid)
+        pool.add_role(role)
+        tk = create_talk_toolkit(pool)
+        tk._role_holder = {"role": role}  # type: ignore[attr-defined]
+        toolkits[rid] = tk
+    return pool, toolkits
+
+
+def _talk(toolkits, sender_id: str, target: str, message: str, wait=False) -> str:
+    """调用发送方 talk 处理器 (与 call_tool 同一逻辑)."""
+    args: dict[str, object] = {"target": target, "message": message}
+    if wait:
+        args["wait"] = True
+    return toolkits[sender_id]._tools["talk"].handler(args)
+
+
+def _wait_until(pred, timeout=5.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if pred():
+            return True
+        time.sleep(0.02)
+    return False
+
+
+# ── 1) wait 往返 ──────────────────────────────────────────
+
+def test_wait_roundtrip(tmp_path, monkeypatch):
+    """A wait=true 发给 B, B 用 talk 回复 → A 收到回复, 状态恢复为原状态."""
+    pool, tks = _setup_roles(tmp_path, monkeypatch, "A", "B")
+    role_a = pool.get_role("A")
+
+    result = {}
+
+    def sender():
+        result["text"] = _talk(tks, "A", "B", "请问进度?", wait=True)
+
+    t = threading.Thread(target=sender)
+    t.start()
+    try:
+        assert _wait_until(lambda: role_a.state.value == "WAIT"), "A 未进入 WAIT"
+        # B 处理消息后回复 A (普通 talk, 不带 wait)
+        reply = _talk(tks, "B", "A", "进度 80%")
+        assert "已回复给正在等待的" in reply
+        t.join(timeout=5)
+    finally:
+        t.join(timeout=1)
+        pool.shutdown(wait=False)
+
+    assert not t.is_alive()
+    assert "已收到 角色B (B) 的回复: 进度 80%" in result["text"]
+    assert role_a.state.value == "ON_DUTY_IDLE"   # 状态恢复
+
+
+# ── 2) 双向互等拆解 ───────────────────────────────────────
+
+def test_mutual_wait_decomposed(tmp_path, monkeypatch):
+    """A 等 B 期间, B 也调 talk(A, wait=true) → 作为回复投递, B 不进入等待."""
+    pool, tks = _setup_roles(tmp_path, monkeypatch, "A", "B")
+    role_a, role_b = pool.get_role("A"), pool.get_role("B")
+
+    role_a._begin_wait("B")   # A 正在等 B 的回复
+    try:
+        # B 回复时误带 wait=true → 应被当作回复投递 (忽略 wait), 不死锁
+        result = _talk(tks, "B", "A", "收到, 马上处理", wait=True)
+        assert "已回复给正在等待的" in result
+        assert role_a._reply_box == "收到, 马上处理"   # 投递进 A 的信箱
+        assert role_b.state.value == "ON_DUTY_IDLE"    # B 没有进入 WAIT
+    finally:
+        role_a._end_wait()
+
+
+# ── 3) 环形等待拒绝 ───────────────────────────────────────
+
+def test_deadlock_cycle_rejected(tmp_path, monkeypatch):
+    """A 等 B, B 等 C, C 等 A (等待链成环) → A 再 wait B 被拒绝."""
+    pool, tks = _setup_roles(tmp_path, monkeypatch, "A", "B", "C")
+    role_a, role_b, role_c = pool.get_role("A"), pool.get_role("B"), pool.get_role("C")
+
+    role_b._begin_wait("C")   # B 等 C
+    role_c._begin_wait("A")   # C 等 A → 链: B→C→A
+    try:
+        result = _talk(tks, "A", "B", "有急事", wait=True)
+        assert "死锁" in result          # wait 被拒绝
+        assert role_a.state.value == "ON_DUTY_IDLE"   # A 未进入 WAIT
+    finally:
+        role_b._end_wait()
+        role_c._end_wait()
+
+
+# ── 4) 超时兜底 ───────────────────────────────────────────
+
+def test_wait_timeout_restores_state(tmp_path, monkeypatch):
+    """对方不回复 → 超时返回错误文本, A 状态恢复."""
+    monkeypatch.setattr(talk_toolkit, "TALK_WAIT_TIMEOUT", 1.0)
+    pool, tks = _setup_roles(tmp_path, monkeypatch, "A", "B")
+    role_a = pool.get_role("A")
+
+    result = {}
+
+    def sender():
+        result["text"] = _talk(tks, "A", "B", "在吗?", wait=True)
+
+    t = threading.Thread(target=sender)
+    t.start()
+    try:
+        assert _wait_until(lambda: role_a.state.value == "WAIT"), "A 未进入 WAIT"
+        time.sleep(2.0)   # 超过 1s 超时, B 始终不回复
+        t.join(timeout=5)
+    finally:
+        t.join(timeout=1)
+        pool.shutdown(wait=False)
+
+    assert not t.is_alive()
+    assert "超时" in result["text"]
+    assert role_a.state.value == "ON_DUTY_IDLE"   # 状态已恢复
+    assert pool.get_role("B").queue_depth == 1    # 消息确实送达了 B
+
+
+# ── 5) 非等待对象消息不投递 ───────────────────────────────
+
+def test_third_party_message_not_delivered_as_reply(tmp_path, monkeypatch):
+    """A 等 B 期间, C 发普通消息给 A → 正常入队, 不误投为回复, A 仍 WAIT."""
+    pool, tks = _setup_roles(tmp_path, monkeypatch, "A", "B", "C")
+    role_a = pool.get_role("A")
+
+    role_a._begin_wait("B")
+    try:
+        result = _talk(tks, "C", "A", "普通消息")
+        assert "消息已发送给" in result
+        assert role_a.state.value == "WAIT"            # 仍在等待 B
+        assert role_a._reply_box is None               # 没有收到"回复"
+        assert role_a.queue_depth == 1                 # 消息入队, 恢复后处理
+    finally:
+        role_a._end_wait()

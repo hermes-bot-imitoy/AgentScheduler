@@ -122,7 +122,8 @@ class AgentSystem:
         """
         if event.event_type == EVENT_SHIFT_START:
             for role in self.pool.all_roles():
-                if role.state != AgentState.ON_DUTY_IDLE:
+                # 上班唤醒; WAIT 角色本来就在岗等回复, 不重置 (避免破坏等待)
+                if role.state not in (AgentState.ON_DUTY_IDLE, AgentState.WAIT):
                     role.state = AgentState.ON_DUTY_IDLE
                     logger.info("AgentSystem: SHIFT_START → %s 上班 (ON_DUTY_IDLE)", role.role_id)
                 # 上班自动开机 (下班后 summary 已自动关机)

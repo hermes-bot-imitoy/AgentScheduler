@@ -18,8 +18,13 @@ import logging
 from typing import Any
 
 from src.core.tools import ToolKit
+from src.core.types import AgentState
 
 logger = logging.getLogger(__name__)
+
+# wait=true 时最长等待对方回复的秒数; 超时返回错误文本并恢复状态
+# (兜底: 即使等待链异常/对方失联, 角色也不会永久阻塞)
+TALK_WAIT_TIMEOUT = 120.0
 
 
 def build_team_roster(pool: Any) -> str:
@@ -44,6 +49,34 @@ def build_team_roster(pool: Any) -> str:
     return "\n".join(roster_lines)
 
 
+def _would_deadlock(pool: Any, start_role: Any, sender_id: str) -> bool:
+    """沿 WAIT 等待链查环: start_role 的等待链上若绕回 sender_id 则成环 (互等死锁).
+
+    例: A wait B, B wait C, C wait A → 任一角色再发起 wait 都会被本检测拒绝.
+    双向互等 (A wait B 且 B wait A) 已被"回复投递"规则优先拆解, 这里兜底
+    处理 3 个及以上角色的环形等待.
+
+    参数:
+        pool: RolePool (查等待链上的角色).
+        start_role: 目标角色 (发送者想 wait 的对象).
+        sender_id: 发送者 role_id.
+
+    返回:
+        True = 构成等待环, 应拒绝 wait.
+    """
+    seen = set()
+    cur = start_role
+    while cur is not None and cur.state == AgentState.WAIT and cur._waiting_reply_from:
+        if cur.role_id in seen:
+            return True  # 等待链自身成环 (理论不可达, 防御)
+        seen.add(cur.role_id)
+        nxt_id = cur._waiting_reply_from
+        if nxt_id == sender_id:
+            return True  # 等待链绕回发送者 → 互等死锁
+        cur = pool._roles.get(nxt_id)
+    return False
+
+
 def create_talk_toolkit(pool: Any) -> ToolKit:
     """创建通信工具类 (talk + list_roles).
 
@@ -58,23 +91,57 @@ def create_talk_toolkit(pool: Any) -> ToolKit:
     tk = ToolKit(name="communication", description="角色间通信工具类")
 
     def _talk_handler(args: dict[str, Any]) -> str:
-        """talk 工具处理函数: 发送消息给指定角色.
+        """talk 工具处理函数: 发送消息/委托任务, 可选 wait=true 同步等待回复.
 
         参数:
-            args: {"target": 目标role_id, "message": 消息内容, "urgency": 紧急度}
+            args: {"target": 目标role_id, "message": 消息内容,
+                   "urgency": 紧急度, "wait": 是否等待回复 (默认 false)}
+
+        wait=true 流程:
+            1. 发送方角色状态 → WAIT (记录原状态)
+            2. 消息入目标角色队列
+            3. 发送方 worker 阻塞等待, 目标角色处理消息后调 talk 回复
+               (回复投递: 目标 WAIT 且等待对象是发送者 → 直接进回复信箱唤醒)
+            4. 收到回复 → 恢复原状态, 返回回复内容给 LLM
+            超时 (TALK_WAIT_TIMEOUT 秒) → 恢复原状态, 返回超时错误文本.
+
+        死锁防护 (多个角色同时 wait=true):
+            - 回复投递优先: 目标在等自己 → 一律视为回复, 不进入等待
+            - 环形等待检测: 发起 wait 前沿等待链查环, 成环则拒绝
+            - 超时兜底: 任何情况下等待都不会超过 TALK_WAIT_TIMEOUT 秒
 
         返回:
-            发送结果字符串 (包含目标角色的队列深度).
+            发送结果字符串 (含对方队列深度或对方回复内容).
         """
         target = args.get("target", "")
         message = args.get("message", "")
         urgency_str = args.get("urgency", "NORMAL")
+        # wait 参数: 模型可能传布尔或字符串 ("true"/"false"), 统一解析
+        wait_val = args.get("wait", False)
+        if isinstance(wait_val, str):
+            wait = wait_val.lower() in ("1", "true", "yes", "on")
+        else:
+            wait = bool(wait_val)
 
         if not target or not message:
             return "错误: 'target' 和 'message' 为必填参数."
 
         target_role = pool.get_role(target)
         urgency = getattr(Urgency, urgency_str.upper(), Urgency.NORMAL)
+        sender = getattr(tk, "_role_holder", None)
+        sender = sender.get("role") if sender is not None else None
+        sender_id = sender.role_id if sender is not None else None
+
+        # ── 1) 回复投递: 目标正处于 WAIT 且在等我回复 → 直接投递唤醒 ──
+        #    等待者 worker 阻塞中, 回复绝不能入队 (否则永远收不到);
+        #    wait 参数在此被忽略 — 回复本身不进入等待, 从根上拆解双向互等.
+        if (target_role.state == AgentState.WAIT
+                and target_role._waiting_reply_from == sender_id):
+            target_role._deliver_reply(message)
+            if sender is not None:
+                sender.journal(
+                    f"回复了等待中的 {target_role.name} ({target}): {message[:80]}")
+            return f"已回复给正在等待的 {target_role.name} ({target})."
 
         task = Task(
             urgency=urgency,
@@ -82,11 +149,35 @@ def create_talk_toolkit(pool: Any) -> ToolKit:
             source="talk",
             context={"message": message},
         )
+
+        # ── 2) wait=true: 同步等待对方回复 ──
+        if wait:
+            if sender is None:
+                return "错误: 当前角色未绑定, 无法使用 wait=true。"
+            # 死锁防护: 目标正处于 WAIT, 沿其等待链查环 (A等B→B等C→C等A)
+            if target_role.state == AgentState.WAIT and _would_deadlock(
+                    pool, target_role, sender.role_id):
+                return ("错误: 检测到互相等待死锁 (对方的等待链成环回到你)。"
+                        "请勿使用 wait=true, 改为普通消息或稍后再询问。")
+            # 先进入 WAIT 再发消息: 防止对方秒回时回复投递条件不成立 (竞态)
+            sender._begin_wait(target)
+            try:
+                target_role.add_task(task)
+                sender.journal(
+                    f"发消息给 {target_role.name} ({target}, {urgency.name}, 等待回复): "
+                    f"{message[:80]}")
+                reply = sender._wait_for_reply(TALK_WAIT_TIMEOUT)
+            finally:
+                sender._end_wait()
+            if reply is None:
+                return (f"等待 {target_role.name} ({target}) 回复超时 "
+                        f"({TALK_WAIT_TIMEOUT:.0f}s), 未收到回复。")
+            return f"已收到 {target_role.name} ({target}) 的回复: {reply}"
+
+        # ── 3) 普通消息: 入目标队列, 立即返回 ──
         target_role.add_task(task)
-        # 上下文更新: 发送消息 → 写入发送方角色活动日志 (接收方由 add_task 记录)
-        sender = getattr(tk, "_role_holder", None)
-        if sender is not None and sender.get("role") is not None:
-            sender["role"].journal(
+        if sender is not None:
+            sender.journal(
                 f"发消息给 {target_role.name} ({target}, {urgency.name}): {message[:80]}")
         return (
             f"消息已发送给 {target_role.name} ({target}), 紧急度={urgency.name}, "
@@ -113,7 +204,11 @@ def create_talk_toolkit(pool: Any) -> ToolKit:
             "给团队成员发送消息或委托任务. "
             "团队当前有哪些成员请先调用 list_roles 获取 (名单是动态的, 可能有新入职). "
             "根据每个人的职责选择合适的人选后, 用 target 发送.\n"
-            "target 参数使用 role_id."
+            "target 参数使用 role_id.\n"
+            "wait=true 表示需要对方回复后才能继续 (同步等待): 你会进入 WAIT 状态, "
+            "对方会用 talk 工具回复你, 收到回复后工具返回回复内容并恢复原状态. "
+            "等待上限 120 秒, 超时会返回错误. 仅在确实需要对方答案才能继续时才用 wait=true; "
+            "普通通知/委托请用 wait=false (默认), 不要互相 wait 以免死锁."
         ),
         input_schema={
             "type": "object",
@@ -130,6 +225,10 @@ def create_talk_toolkit(pool: Any) -> ToolKit:
                     "type": "string",
                     "enum": ["LOW", "NORMAL", "HIGH", "CRITICAL"],
                     "description": "紧急程度, 生产事故用 CRITICAL.",
+                },
+                "wait": {
+                    "type": "boolean",
+                    "description": "是否等待对方回复 (默认 false). true = 同步等待, 收到回复后继续.",
                 },
             },
             "required": ["target", "message"],

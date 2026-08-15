@@ -90,10 +90,10 @@ class EventDispatcher:
             if event.target_role is not None:
                 if role_name != event.target_role:
                     continue
-                # 已下班 (OFF_DUTY/WRAPPING_UP) 的角色不被非紧急定向事件打扰:
-                # 强制入队会让 worker 在下班时间处理提醒
+                # 已下班 (OFF_DUTY/WRAPPING_UP) 或等待回复中 (WAIT) 的角色不被
+                # 非紧急定向事件打扰: 强制入队会让 worker 在下班/等待时间处理提醒
                 if event.priority < Priority.EMERGENCY and role.state in (
-                        AgentState.OFF_DUTY, AgentState.WRAPPING_UP):
+                        AgentState.OFF_DUTY, AgentState.WRAPPING_UP, AgentState.WAIT):
                     self.stats["roles_skipped"] += 1
                     logger.info(
                         "  → [%s] SKIPPED: 角色已%s, 非紧急定向事件不打扰",
