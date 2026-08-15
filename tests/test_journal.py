@@ -54,3 +54,17 @@ def test_journal_all_writes_every_role(tmp_path, monkeypatch):
     for rid in ("role_a", "role_b"):
         content = open(_journal_path(tmp_path, rid), encoding="utf-8").read()
         assert "全局通知: 测试广播" in content
+
+
+def test_add_role_creates_journal_immediately(tmp_path, monkeypatch):
+    """角色注册进池时立即创建专属日志文件 (不等第一次活动)."""
+    monkeypatch.setattr("src.core.roles.JOURNAL_DIR", tmp_path)
+    pool = RolePool()
+    pool.add_role(AgentRole(name="张三", role_id="dev_1", title="前端开发"))
+    pool.add_role(AgentRole(name="李四", role_id="dev_2", title="后端开发"))
+
+    # 注册即生成文件, 且带"角色就位"记录
+    for rid, name in (("dev_1", "张三"), ("dev_2", "李四")):
+        content = open(_journal_path(tmp_path, rid), encoding="utf-8").read()
+        assert "角色就位" in content
+        assert name in content

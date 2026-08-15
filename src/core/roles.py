@@ -700,6 +700,9 @@ class RolePool:
         if role.role_id in self._roles:
             raise ValueError(f"Role '{role.role_id}' already exists")
         self._roles[role.role_id] = role
+        # 每个注册进池的角色都立即拥有专属活动日志 (data/journals/<role_id>.md),
+        # 不等第一次活动 — 保证"所有角色都有一个专门的 log".
+        role.journal(f"角色就位: {role.name} — {role.title or role.role_id}")
 
     def _setup_role(self, role: AgentRole) -> None:
         """角色装配 (唯一入口): 绑定共享时钟 → 默认工具 → 默认 MCP 组.

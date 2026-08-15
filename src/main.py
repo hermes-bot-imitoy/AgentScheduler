@@ -30,6 +30,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.core.agent_system import AgentSystem
+from src.core.role_templates import DEFAULT_ROLES
 from src.core.types import AgentState, Event, Priority
 from src.python_tools.client_toolkit import create_client_toolkit
 from src.python_tools.hr_toolkit import create_hr_toolkit
@@ -68,7 +69,7 @@ def _strip_ansi(text: str) -> str:
     """去掉 ANSI 颜色码, 得到纯文本 (写日志文件用)."""
     return _re.sub(r"\x1b\[[0-9;]*m", "", text)
 
-ROLE_IDS = ["CEO", "COO", "HR"]   # 默认角色 (role_id 全大写); CFO 暂不启用, 后续再加
+ROLE_IDS = sorted(DEFAULT_ROLES)   # 默认团队: 管理层 + 工程团队 (每个角色都有专属活动日志)
 
 # 时间参数 (真实时间, 分钟/小时)
 TICK_MINUTES = 10        # 1 Tick = 10 真实分钟
@@ -192,8 +193,8 @@ def run_one_day(system: AgentSystem, day: int, with_client_task: bool) -> None:
     )
     time_module.sleep(5)  # 给角色收尾一小段时间
 
-    step("等待角色调用 summary 工具 (最长 240 秒)...")
-    deadline = time_module.time() + 240
+    step("等待角色调用 summary 工具 (40 角色并发, 最长 600 秒)...")
+    deadline = time_module.time() + 600
     while time_module.time() < deadline:
         if all(system.get_role(rid).state == AgentState.OFF_DUTY for rid in ROLE_IDS):
             break
@@ -203,7 +204,11 @@ def run_one_day(system: AgentSystem, day: int, with_client_task: bool) -> None:
     step("检查下班状态...")
     off_duty = [rid for rid in ROLE_IDS
                 if system.get_role(rid).state == AgentState.OFF_DUTY]
-    ok(f"OFF_DUTY 角色: {off_duty}") if off_duty else warn("角色仍未全部 OFF_DUTY")
+    if off_duty:
+        ok(f"OFF_DUTY 角色: {len(off_duty)}/{len(ROLE_IDS)}"
+           f" ({', '.join(off_duty[:6])}{'...' if len(off_duty) > 6 else ''})")
+    else:
+        warn("角色仍未全部 OFF_DUTY")
 
     for rid in ROLE_IDS:
         role = system.get_role(rid)
@@ -226,12 +231,12 @@ def run_one_day(system: AgentSystem, day: int, with_client_task: bool) -> None:
 def main() -> None:
     header("作息系统演示 — 真实时间流动 (1 Tick = 10 分钟)")
 
-    # ── 1. 开局: 默认角色 (CEO/COO/HR) + CEO 甲方交流工具 ──
-    step(f"创建 AgentSystem, 加入 {len(ROLE_IDS)} 个默认角色 ({'/'.join(ROLE_IDS)})...")
+    # ── 1. 开局: 默认团队 (管理层 + 工程团队, 每个角色都有专属活动日志) ──
+    step(f"创建 AgentSystem, 加入 {len(ROLE_IDS)} 个默认角色...")
     system = AgentSystem(role_ids=ROLE_IDS)
     system.get_role("CEO").add_toolkit(create_client_toolkit())
     system.get_role("HR").add_toolkit(create_hr_toolkit())
-    ok(f"角色就绪: {system.pool.list_roles()}")
+    ok(f"角色就绪: {len(system.pool.list_roles())} 人 (CEO/COO/HR + 工程团队)")
     ok("CEO 已装备 talk_to_client (与甲方实时交流)")
     ok("HR 已装备招聘工具 (post_job_posting / list_candidates)")
 
@@ -241,8 +246,9 @@ def main() -> None:
     ok(f"时间规则: 1 Tick = {TICK_MINUTES} 分钟; 下班 = {SHIFT_END_HOURS} 小时后; "
        f"第 2 天 = {DAY_BOUNDARY_HOURS} 小时后")
     time_module.sleep(3)  # 等 SHIFT_START (Tick 0) 触发
-    states = {rid: system.get_role(rid).state.value for rid in ROLE_IDS}
-    info(f"角色状态: {states}")
+    from collections import Counter
+    states = Counter(system.get_role(rid).state.value for rid in ROLE_IDS)
+    info(f"角色状态: {dict(states)}")
 
     # ── 3. 多日循环: 第 1 天有甲方沟通, 之后自动进入下一天 ──
     day = 1
