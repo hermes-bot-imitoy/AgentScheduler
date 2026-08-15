@@ -213,6 +213,7 @@ NoteStore(base_dir="./data/notes", role_id="", computer=None)
 **提示词**: `build_system_prompt() -> str`（自动注入"今天是第 X 天" + 昨日总结）。
 **队列**: `add_task(task)` / `pop_task()` / `peek_next_urgency()` / `queue_depth` / `current_task` / `is_busy`。
 **存储与时间**: `note_store` 属性（惰性 NoteStore）、`get_latest_summary(before_day=None)`、`time_manager` 属性、`bind_time_manager(tm)`。
+**活动日志**: `journal(entry)` — 追加一行到 `data/journals/<role_id>.md`（角色上下文更新自动写入：收到任务/执行/工具调用/笔记/消息）。
 **工具**: `add_mcp_tool(name, description, input_schema, handler)`、`add_toolkit(toolkit) -> int`、`mcp_tool_names`。
 **交流**: `talk_to(target, message, urgency="NORMAL") -> str`（编程式跨角色消息）。
 
@@ -232,6 +233,7 @@ RolePool(llm_api_key=None, llm_model=None, llm_provider=None)  # llm_provider �
 | `start()` | — | None | 启动全部 worker 线程 + 自动注册 talk 工具 |
 | `shutdown(wait=True)` | bool | None | 停止 |
 | `assign_task(role_name, task)` | str, Task | None | 投递任务 |
+| `journal_all(entry)` | str | None | 全局通知，写入每个角色的活动日志 |
 | `get_status()` | — | dict | {role_id: {busy, queue_depth, current_task, next_urgency}} |
 
 ```python

@@ -72,6 +72,10 @@ def create_memory_toolkit() -> ToolKit:
 
         path = store.save_summary(content, day=day)
 
+        # 上下文更新: 总结保存 → 写入角色活动日志
+        if role is not None:
+            role.journal(f"保存第 {day} 天总结 ({len(content)} 字符)")
+
         # 总结完成 → 角色下班 (OFF_DUTY) + 一天结束自动关电脑
         if role is not None:
             from src.core.types import AgentState
@@ -103,7 +107,11 @@ def create_memory_toolkit() -> ToolKit:
             return "错误: 'title' (笔记标题) 为必填参数."
 
         store = _get_store()
+        role = _get_role()
         path = store.write_note(title, content)
+        # 上下文更新: 新笔记 → 写入角色活动日志
+        if role is not None:
+            role.journal(f"写入笔记: {title}")
         return f"笔记已保存: {path}"
 
     def _edit_note(args: dict[str, Any]) -> str:
@@ -121,7 +129,11 @@ def create_memory_toolkit() -> ToolKit:
             return "错误: 'title' (笔记标题) 为必填参数."
 
         store = _get_store()
+        role = _get_role()
         path = store.edit_note(title, content)
+        # 上下文更新: 笔记被编辑 → 写入角色活动日志
+        if role is not None:
+            role.journal(f"更新笔记: {title}")
         return f"笔记已更新: {path}"
 
     def _list_notes(args: dict[str, Any]) -> str:

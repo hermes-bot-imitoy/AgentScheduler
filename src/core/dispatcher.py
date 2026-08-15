@@ -98,6 +98,10 @@ class EventDispatcher:
                     logger.info(
                         "  → [%s] SKIPPED: 角色已%s, 非紧急定向事件不打扰",
                         role_name, role.state.value)
+                    # 定向通知: 目标角色已下班被打断 → 写入该角色活动日志
+                    role.journal(
+                        f"定向通知 [{event.source}/{event.event_type}] "
+                        f"({event.priority.name}): 跳过 — 角色已{role.state.value}")
                     results[role_name] = {
                         "accepted": False,
                         "reason": f"角色已{role.state.value}, 非紧急定向事件不打扰",
@@ -123,6 +127,10 @@ class EventDispatcher:
             else:
                 self.stats["roles_skipped"] += 1
                 logger.info("  → [%s] SKIPPED: %s", role_name, reason)
+                # 全局通知: 未接受的角色也写入活动日志 (含原因), 保证每个角色都记一条
+                role.journal(
+                    f"全局通知 [{event.source}/{event.event_type}] "
+                    f"({event.priority.name}): 跳过 — {reason}")
 
             results[role_name] = {
                 "accepted": accepted,

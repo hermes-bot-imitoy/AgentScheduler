@@ -23,9 +23,11 @@ import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import IntEnum
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 from src.core.llm import DeepSeekLLM, OllamaLLM
+from src.core.note_store import NoteStore
 from src.core.types import AgentState, Event, Priority
 
 logger = logging.getLogger(__name__)
@@ -39,6 +41,13 @@ MAX_TOOL_TOTAL_TOKENS = 200_000   # 单任务累计 Token 上限 (含 thinking �
 
 # LLM 调用失败时的错误文本标记 (llm.py 超时/异常时返回这些前缀)
 LLM_ERROR_MARKERS = ("[API timeout]", "[API error:")
+
+# ── 角色活动日志 ──────────────────────────────────────────
+# 每个角色一个日志文件 (data/journals/<role_id>.md), 记录该角色的上下文更新
+# (收到任务/开始执行/工具调用/笔记写入/消息收发/事件接受与跳过) 与全局通知.
+# 全局通知会写入每个角色的日志. 目录已在 .gitignore, 不入库.
+JOURNAL_DIR = Path("data/journals")
+_JOURNAL_LOCK = threading.Lock()   # 多角色线程并发写日志的全局锁
 
 
 class ToolLoopError(RuntimeError):
@@ -277,6 +286,10 @@ class AgentRole:
                 "[%s] Task queued: %s (urgency=%s, queue_depth=%d)",
                 self.role_id, task.task_id, Urgency(-task.urgency).name, len(self._queue),
             )
+        # 上下文更新: 新任务入队 → 写入角色活动日志
+        self.journal(
+            f"收到任务 [{Urgency(-task.urgency).name}]: {task.description[:120]}"
+        )
 
     def pop_task(self) -> Optional[Task]:
         """Pop the highest-urgency task. Returns None if queue is empty."""
@@ -351,6 +364,41 @@ class AgentRole:
         """
         return self.note_store.get_latest_summary(before_day)
 
+    # ── 活动日志 (journal) ───────────────────────────────
+
+    def journal(self, entry: str) -> None:
+        """写入角色活动日志 (data/journals/<role_id>.md), 便于查看角色活动信息.
+
+        角色每次上下文更新 (收到任务/开始执行/工具调用/笔记写入/消息收发/
+        事件接受与跳过) 都追加一行; 全局通知由 RolePool.journal_all 统一
+        写入每个角色. 行格式: [D<第几天> T<Tick> HH:MM:SS] 内容.
+
+        参数:
+            entry: 活动内容 (单行; 内部换行/空白会被压缩为单个空格).
+
+        说明:
+            纯本地文件 (不走角色电脑), 多线程安全 (全局锁); 写失败只记
+            warning, 绝不影响角色主流程.
+        """
+        line = " ".join(str(entry).split())
+        # 时间上下文: 第几天 / Tick / 时分秒 (时钟未启动时回落到第 1 天 Tick 0)
+        try:
+            day = self.time_manager.day_number()
+            tick = self.time_manager.current_tick()
+        except Exception:
+            day, tick = 1, 0
+        ts = time.strftime("%H:%M:%S")
+        try:
+            with _JOURNAL_LOCK:
+                path = JOURNAL_DIR / f"{NoteStore._sanitize_title(self.role_id or 'shared')}.md"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with path.open("a", encoding="utf-8") as f:
+                    f.write(f"[D{day} T{tick} {ts}] {line}\n")
+            logger.debug("[%s] 活动日志: %s", self.role_id, line[:100])
+        except Exception:
+            logger.warning("[%s] 写活动日志失败: %s", self.role_id, line[:100],
+                           exc_info=True)
+
     # ── Time manager (作息时间) ───────────────────────────
 
     # 进程级默认共享时钟: 绕过 AgentSystem/RolePool 直接构造的角色
@@ -422,6 +470,7 @@ class AgentRole:
         from src.python_tools.talk_toolkit import create_talk_toolkit
 
         tk = create_talk_toolkit(self._pool)
+        tk._role_holder = {"role": self}  # type: ignore[attr-defined]  # 供 talk 记录发送方活动日志
         added = self.add_toolkit(tk)
         logger.info("[%s] talk toolkit loaded — %d tools", self.role_id, added)
 
@@ -526,6 +575,11 @@ class AgentRole:
                             self.role_id, tool_name,
                             json.dumps(tool_args, ensure_ascii=False),
                             tool_result[:80])
+                # 上下文更新: 工具调用及结果 → 写入角色活动日志
+                self.journal(
+                    f"调用工具 {tool_name}"
+                    f"({json.dumps(tool_args, ensure_ascii=False)[:80]})"
+                    f" → {(tool_result or '')[:100]}")
 
                 # 原生协议: 工具结果以 role:"tool" 消息回喂, 关联 tool_call_id
                 messages.append({
@@ -695,6 +749,15 @@ class RolePool:
     def list_roles(self) -> list[str]:
         return list(self._roles)
 
+    def journal_all(self, entry: str) -> None:
+        """全局通知: 给每个角色的活动日志都写一条 (查看团队活动信息).
+
+        参数:
+            entry: 通知内容 (会原样写入每个角色的日志文件).
+        """
+        for role in self._roles.values():
+            role.journal(entry)
+
     # ── Lifecycle ──────────────────────────────────────────
 
     def start(self) -> None:
@@ -755,6 +818,8 @@ class RolePool:
             role._current_task = task
             task.status = "running"
             logger.info("[%s] Processing task: %s (%s)", role.role_id, task.task_id, task.description[:60])
+            # 上下文更新: 任务开始执行 → 写入角色活动日志
+            role.journal(f"开始执行任务: {task.description[:120]}")
 
             if role.on_task_start:
                 try:
@@ -783,10 +848,14 @@ class RolePool:
                 task.status = "done"
                 logger.info("[%s] Task %s done (%d tokens): %s",
                             role.role_id, task.task_id, tokens, result_text[:80])
+                # 上下文更新: 任务完成 → 写入角色活动日志
+                role.journal(f"任务完成 ({tokens} tokens): {(result_text or '')[:150]}")
             except Exception as exc:
                 task.result = f"[ERROR] {exc}"
                 task.status = "failed"
                 logger.error("[%s] Task %s failed: %s", role.role_id, task.task_id, exc)
+                # 上下文更新: 任务失败 → 写入角色活动日志
+                role.journal(f"任务失败: {exc}")
 
             role._current_task = None
 

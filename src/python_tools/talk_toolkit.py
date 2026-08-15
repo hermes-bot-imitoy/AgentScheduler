@@ -83,6 +83,11 @@ def create_talk_toolkit(pool: Any) -> ToolKit:
             context={"message": message},
         )
         target_role.add_task(task)
+        # 上下文更新: 发送消息 → 写入发送方角色活动日志 (接收方由 add_task 记录)
+        sender = getattr(tk, "_role_holder", None)
+        if sender is not None and sender.get("role") is not None:
+            sender["role"].journal(
+                f"发消息给 {target_role.name} ({target}, {urgency.name}): {message[:80]}")
         return (
             f"消息已发送给 {target_role.name} ({target}), 紧急度={urgency.name}, "
             f"对方队列现有 {target_role.queue_depth} 个任务."

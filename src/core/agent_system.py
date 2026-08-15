@@ -27,7 +27,7 @@ from typing import Any, Optional
 from src.core.dispatcher import EventDispatcher
 from src.core.roles import RolePool
 from src.core.role_templates import DEFAULT_ROLES, get_template
-from src.core.time_manager import EVENT_SHIFT_START, TimeEventBus
+from src.core.time_manager import EVENT_SHIFT_END, EVENT_SHIFT_START, TimeEventBus
 from src.core.types import AgentState, Event
 
 logger = logging.getLogger(__name__)
@@ -133,6 +133,11 @@ class AgentSystem:
                                     role.role_id)
                 except Exception:
                     logger.exception("AgentSystem: %s 上班开机失败", role.role_id)
+            # 全局通知: 上班 → 每个角色的活动日志都写一条
+            self.pool.journal_all(f"全局通知: 上班 (SHIFT_START, 第 {self.day} 天)")
+        elif event.event_type == EVENT_SHIFT_END:
+            # 全局通知: 下班 → 每个角色的活动日志都写一条
+            self.pool.journal_all("全局通知: 下班时间到 (SHIFT_END), 各角色总结后休息")
         self.dispatcher.trigger(event)
 
     def _all_roles_idle(self) -> bool:
