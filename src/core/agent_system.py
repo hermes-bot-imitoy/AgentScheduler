@@ -64,16 +64,57 @@ class AgentSystem:
         # 快进: 全部角色空闲时自动跳到下一个事件 Tick
         self.time_manager.set_idle_checker(self._all_roles_idle)
 
-        # 注册角色
-        for role in roles or []:
-            self.add_role(role)
-        for rid in role_ids or []:
-            self.add_role(get_template(rid))
+        # 注册角色 (批量并行装配: 电脑/MCP 服务器启动是主要耗时, 多线程提速)
+        all_roles = list(roles or [])
+        all_roles += [get_template(rid) for rid in role_ids or []]
+        if all_roles:
+            self.add_roles(all_roles)
 
     # ── 角色管理 ──────────────────────────────────────────
 
+    def add_roles(self, roles: list[Any]) -> list[Any]:
+        """批量注册角色: 耗时装配 (电脑创建 + MCP 服务器启动) 多线程并行.
+
+        每个角色的电脑/工具注册表/MCP 工具都是独立的, 装配互不干扰, 可以
+        安全并行; 网络创建有锁 (ensure_network) 防竞态. 装配失败只记日志,
+        不阻塞其他角色; 注册顺序保持传入顺序.
+
+        参数:
+            roles: AgentRole 实例列表.
+
+        返回:
+            传入的角色列表 (便于链式调用).
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        # 先统一绑定共享时间源 (快, 串行); 装配里再绑是幂等的
+        for role in roles:
+            role.bind_time_manager(self.time_manager)
+
+        if self.auto_toolkits:
+            # 并行装配: 每角色一个线程, 限制并发数避免 podman/npx 打满
+            max_workers = min(10, len(roles)) if roles else 1
+            with ThreadPoolExecutor(
+                    max_workers=max_workers, thread_name_prefix="role-setup") as ex:
+                futures = {ex.submit(self.pool._setup_role, r): r for r in roles}
+                for fut in as_completed(futures):
+                    role = futures[fut]
+                    try:
+                        fut.result()
+                    except Exception:
+                        logger.exception("AgentSystem: 角色 %s 装配失败 (电脑/MCP)",
+                                         role.role_id)
+
+        # 按序注册 (含日志初始化)
+        for role in roles:
+            self.pool.add_role(role)
+            logger.info("AgentSystem: 角色已注册 %s (%s)", role.role_id, role.name)
+        return roles
+
     def add_role(self, role: Any) -> Any:
-        """注册角色: 绑定共享 TimeEventBus + 自动注册工具类.
+        """注册单个角色: 绑定共享 TimeEventBus + 自动注册工具类.
+
+        单角色串行装配; 批量场景请用 add_roles (并行, 快).
 
         参数:
             role: AgentRole 实例.
@@ -81,17 +122,7 @@ class AgentSystem:
         返回:
             传入的角色 (便于链式调用).
         """
-        # 绑定共享时间源 (角色 get_time / summary 取到同一时间)
-        role.bind_time_manager(self.time_manager)
-
-        # 自动装配默认工具 + MCP 组 — 统一走 pool._setup_role (唯一入口,
-        # 与招聘入职 add_role_and_start 同一条路径, 防止装配逻辑漂移)
-        if self.auto_toolkits:
-            self.pool._setup_role(role)
-
-        self.pool.add_role(role)
-        logger.info("AgentSystem: 角色已注册 %s (%s)", role.role_id, role.name)
-        return role
+        return self.add_roles([role])[0]
 
     def add_default_roles(self) -> list[Any]:
         """注册全部默认管理角色 (CEO/COO/HR/CFO). 返回角色列表."""

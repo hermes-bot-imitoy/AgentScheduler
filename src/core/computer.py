@@ -30,6 +30,7 @@ import logging
 import shlex
 import shutil
 import subprocess
+import threading
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Optional
@@ -411,15 +412,18 @@ class PodmanComputer(Computer):
 
         try:
             from src.python_tools.mcp_toolkit import MCPServer
-            # 容器内启动 filesystem 服务器: podman exec -i <容器> npx -y <包> /home/agent
+            # 容器内启动 filesystem 服务器: podman exec -i <容器> <node 直启> /home/agent
             # -i 保持 stdin/stdout 管道, MCP stdio 协议走容器内进程
             self._ensure_container()  # 确保容器运行 + 包已预装
+            # 容器内直接 node 启动服务器: 绕过 npx -y 的 npm registry 检查
+            # (npx 每次启动都查 registry, 单次 ~10s, 40 角色并发会严重拖慢加载;
+            # 包已由 _ensure_container 预装到 /usr/local/bin, node 直启秒起)
             self._mcp_server = MCPServer(
                 package=MCP_FILESYSTEM_PACKAGE,
                 args=[self.workdir],  # 授权容器内工作目录
                 command="podman",
-                command_args=["exec", "-i", self.container_name, "npx", "-y",
-                              MCP_FILESYSTEM_PACKAGE, self.workdir],
+                command_args=["exec", "-i", self.container_name, "node",
+                              "/usr/local/bin/mcp-server-filesystem", self.workdir],
             )
             self._mcp_server.connect()
             tools = self._mcp_server.list_tools()
@@ -466,6 +470,10 @@ class PodmanComputer(Computer):
         # 容器挂载宿主机目录: data/computers/<role> ↔ 容器内 /home/agent
         host_dir = self.host_dir
         Path(host_dir).mkdir(parents=True, exist_ok=True)
+        # 共享 npm 全局缓存: 挂载到容器 /root/.npm, 新容器预装 MCP 包时
+        # 命中缓存秒装 (首个容器下载一次, 其余容器从缓存解压 — 40 角色并行
+        # 加载时避免 40 次 npm 网络下载)
+        Path(_NPM_CACHE_HOST).mkdir(parents=True, exist_ok=True)
         r = self._pod("ps", "-a", "--filter", f"name={self.container_name}", "--format", "{{.Names}}")
         if self.container_name not in (r.stdout or ""):
             # 加入自定义桥接网络 (电脑间互通), 网络不存在则先创建
@@ -473,6 +481,7 @@ class PodmanComputer(Computer):
             r = self._pod("run", "-d", "--name", self.container_name,
                           "--network", network,
                           "-v", f"{host_dir}:{self.workdir}",
+                          "-v", f"{_NPM_CACHE_HOST}:/root/.npm",
                           self.image, "sleep", "infinity")
             if r.returncode != 0:
                 raise RuntimeError(
@@ -746,6 +755,10 @@ def create_computer(kind: str = "podman", role_id: str = "", *,
 
 DEFAULT_NETWORK_NAME = "maf-net"  # podman 自定义桥接网络 (电脑间互通)
 
+# 共享 npm 全局缓存目录 (挂载进每个角色容器): 容器预装 MCP 包时命中缓存,
+# 避免 40 个新容器各自 npm 网络下载 (data/ 整体 gitignored, 不入库)
+_NPM_CACHE_HOST = str((Path("./data/computers") / ".npm-cache").resolve())
+
 
 class ComputerManager:
     """电脑管理类: 分配 / 注册 / 查询 / 销毁 各角色电脑.
@@ -764,6 +777,9 @@ class ComputerManager:
         self.network_name = network_name
         self._computers: dict[str, Any] = {}   # role_id → Computer
         self._names: dict[str, str] = {}       # role_id → 人名
+        # podman 网络检查/创建加锁: 多角色并行装配电脑时, 防止 40 个线程
+        # 同时探测到网络不存在 → 并发重复 create 的竞态
+        self._network_lock = threading.Lock()
 
     # ── 网络 ──────────────────────────────────────────────
 
@@ -772,15 +788,17 @@ class ComputerManager:
 
         网络用于让各角色电脑 (容器) 之间可以互相通信.
         本机无 podman 时直接返回网络名 (不实际创建, 降级环境无网络).
+        加锁: 多角色并行装配时只有一个线程真正执行创建.
         """
         if shutil.which("podman") is None:
             return self.network_name
-        r = subprocess.run(["podman", "network", "exists", self.network_name],
-                           capture_output=True, text=True, timeout=30)
-        if r.returncode != 0:
-            subprocess.run(["podman", "network", "create", self.network_name],
-                           capture_output=True, text=True, timeout=60)
-            logger.info("podman 自定义桥接网络已创建: %s", self.network_name)
+        with self._network_lock:
+            r = subprocess.run(["podman", "network", "exists", self.network_name],
+                               capture_output=True, text=True, timeout=30)
+            if r.returncode != 0:
+                subprocess.run(["podman", "network", "create", self.network_name],
+                               capture_output=True, text=True, timeout=60)
+                logger.info("podman 自定义桥接网络已创建: %s", self.network_name)
         return self.network_name
 
     # ── 分配 / 注册 ───────────────────────────────────────
