@@ -31,6 +31,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.core.agent_system import AgentSystem
 from src.core.role_templates import DEFAULT_ROLES
+from src.core.state_store import StateStore
 from src.core.types import AgentState, Event, Priority
 from src.python_tools.client_toolkit import create_client_toolkit
 from src.python_tools.hr_toolkit import create_hr_toolkit
@@ -240,6 +241,14 @@ def main() -> None:
     ok("CEO 已装备 talk_to_client (与甲方实时交流)")
     ok("HR 已装备招聘工具 (post_job_posting / list_candidates)")
 
+    # ── 0. 恢复上次进度 (StateStore: 角色档案/任务/对话/容器/时间) ──
+    store = StateStore()
+    restored = store.restore(system) if store.exists() else 0
+    if restored:
+        ok(f"已从存档恢复 {restored} 个角色 → {system.describe()}")
+    else:
+        ok("无存档, 从第 1 天 Tick 0 开始")
+
     # ── 2. 启动系统 (真实时钟, Tick 0 = 第 1 天上班) ───────
     system.start()
     ok(f"系统已启动: {system.describe()}")
@@ -251,22 +260,27 @@ def main() -> None:
     info(f"角色状态: {dict(states)}")
 
     # ── 3. 多日循环: 第 1 天有甲方沟通, 之后自动进入下一天 ──
-    day = 1
-    while True:
-        run_one_day(system, day, with_client_task=(day == 1))
+    day = system.day  # 恢复存档后从上次的天数继续
+    try:
+        while True:
+            run_one_day(system, day, with_client_task=(day == 1))
 
-        # 一天结束: 自动进入第二天 (不再询问用户), 打印醒目横幅
-        next_day = day + 1
-        _console_print(f"\n{BOLD}{GREEN}{'═' * 62}{RESET}")
-        _console_print(f"{BOLD}{GREEN}  🎉 第 {day} 天结束!{RESET}")
-        _console_print(f"{BOLD}{GREEN}  已自动进入第 {next_day} 天: 将于约 "
-                       f"{DAY_BOUNDARY_HOURS - SHIFT_END_HOURS} 小时后上班 "
-                       f"(SHIFT_START 自动触发){RESET}")
-        _console_print(f"{BOLD}{GREEN}{'═' * 62}{RESET}\n")
-        day = next_day
-
-    system.stop()
-    _console_print(f"\n{BOLD}{GREEN}演示完成 ✓{RESET} (共运行 {day} 天)")
+            # 一天结束: 自动进入第二天 (不再询问用户), 打印醒目横幅
+            next_day = day + 1
+            _console_print(f"\n{BOLD}{GREEN}{'═' * 62}{RESET}")
+            _console_print(f"{BOLD}{GREEN}  🎉 第 {day} 天结束!{RESET}")
+            _console_print(f"{BOLD}{GREEN}  已自动进入第 {next_day} 天: 将于约 "
+                           f"{DAY_BOUNDARY_HOURS - SHIFT_END_HOURS} 小时后上班 "
+                           f"(SHIFT_START 自动触发){RESET}")
+            _console_print(f"{BOLD}{GREEN}{'═' * 62}{RESET}\n")
+            day = next_day
+    except KeyboardInterrupt:
+        warn("\n收到 Ctrl+C, 正在保存进度并退出...")
+    finally:
+        # 退出自动保存: 角色档案/任务/对话/容器/时间进度 → data/state.json
+        store.save(system)
+        system.stop()
+        _console_print(f"\n{BOLD}{GREEN}演示结束 ✓ (运行到第 {day} 天, 进度已保存){RESET}\n")
 
 
 if __name__ == "__main__":

@@ -127,6 +127,7 @@ class TimeEventBus(EventBus):
     _fired_day: int = field(default=0, repr=False, init=False)      # 已触发事件的天
     _fired_start: bool = field(default=False, repr=False, init=False)
     _fired_end: bool = field(default=False, repr=False, init=False)
+    _pending_progress: Optional[tuple[int, int]] = field(default=None, repr=False, init=False)  # 恢复进度 (day, tick_of_day)
     _tasks: dict[str, ScheduledTask] = field(default_factory=dict, repr=False, init=False)  # 定时任务表
 
     # 快进功能: 全角色空闲时跳过等待, 直接跳到下一个事件 Tick
@@ -400,6 +401,8 @@ class TimeEventBus(EventBus):
         系统启动时刻记为 Tick 0 / 第 1 天:
           - 每天首次检测到今日 Tick == shift_start_tick → 发送 SHIFT_START
           - 每天首次检测到今日 Tick >= shift_end_tick   → 发送 SHIFT_END
+        若已 set_progress 设置了恢复进度, 启动时直接应用 (时钟前移 + 事件
+        标志按恢复点设置, 不重放已发生的事件).
         """
         if self._running:
             return
@@ -408,12 +411,35 @@ class TimeEventBus(EventBus):
         self._fired_day = 0
         self._fired_start = False
         self._fired_end = False
+        # 恢复上次进度 (StateStore): 时钟前移到目标绝对 Tick, 事件标志按
+        # 恢复点设置 — 当天上班视为已发生, 下班按 tick 位置决定
+        if self._pending_progress is not None:
+            day, tod = self._pending_progress
+            self._pending_progress = None
+            target = (day - 1) * self.ticks_per_day + tod
+            self._start_dt = self._clock() - timedelta(
+                seconds=target * self.minutes_per_tick * 60)
+            self._fired_day = day
+            self._fired_start = True   # 恢复点必在上班区间内 (上班已发生)
+            self._fired_end = tod >= self.shift_end_tick
+            logger.info("TimeEventBus: 已恢复上次进度 → 第 %d 天 Tick %d", day, tod)
         self._thread = threading.Thread(
             target=self._tick_loop, name="time-manager", daemon=True,
         )
         self._thread.start()
         logger.info("TimeEventBus 时间线程已启动 (启动时刻 = Tick 0 / 第 1 天, 检查间隔 %ds)",
                     self.check_interval)
+
+    def set_progress(self, day: int, tick_of_day: int) -> None:
+        """设置恢复进度: 下次 start() 时把时钟前移到 (day, tick_of_day).
+
+        用于 StateStore 重启恢复上次进度 (启动加载存档). 必须在 start() 之前调用.
+
+        参数:
+            day: 第几天 (>= 1).
+            tick_of_day: 当天内 Tick 位置 (0 ~ ticks_per_day-1).
+        """
+        self._pending_progress = (int(day), int(tick_of_day))
 
     def stop(self) -> None:
         """停止时间线程."""

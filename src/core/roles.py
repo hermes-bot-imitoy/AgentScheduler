@@ -166,6 +166,9 @@ class AgentRole:
     on_task_start: Optional[Callable[[AgentRole, Task], None]] = field(default=None, repr=False, init=False)
     on_task_done: Optional[Callable[[AgentRole, Task], None]] = field(default=None, repr=False, init=False)
 
+    # 任务历史: 已完成/失败的任务留档 (对话/工作记录, StateStore 持久化)
+    _task_history: list[Task] = field(default_factory=list, repr=False, init=False)
+
     # ── Event Filter (per-role Layer 1-3) ──────────────────
 
     def evaluate_event(self, event: Event) -> tuple[bool, str]:
@@ -934,12 +937,16 @@ class RolePool:
                             role.role_id, task.task_id, tokens, result_text[:80])
                 # 上下文更新: 任务完成 → 写入角色活动日志
                 role.journal(f"任务完成 ({tokens} tokens): {(result_text or '')[:150]}")
+                # 任务历史留档 (StateStore 持久化: 任务/对话记录)
+                role._task_history.append(task)
             except Exception as exc:
                 task.result = f"[ERROR] {exc}"
                 task.status = "failed"
                 logger.error("[%s] Task %s failed: %s", role.role_id, task.task_id, exc)
                 # 上下文更新: 任务失败 → 写入角色活动日志
                 role.journal(f"任务失败: {exc}")
+                # 失败任务同样留档 (便于重启后复盘)
+                role._task_history.append(task)
 
             role._current_task = None
 

@@ -337,6 +337,26 @@ python src/role_demo.py                         # 示例: 多角色系统全走�
 
 也可代码级指定: `RolePool(llm_provider="ollama")` 或 `RoleFactory(provider="ollama")`。
 
+### 状态持久化 (StateStore)
+
+`main.py` 运行期间所有可序列化状态统一保存到 `data/state.json` (JSON 原子写, 不入库):
+
+- **角色档案** — 名称/职位/职责/性格/技能/状态
+- **任务历史** — 每个角色已完成/失败的任务 (含 talk 消息与结果 = 对话/工作记录)
+- **未完成任务** — 队列待办, 重启后继续处理
+- **电脑/容器信息** — podman 容器类型/人名映射, 重启后绑定已存在的容器, 不重建
+- **时间进度** — 第几天/Tick, 恢复后作息继续
+
+**退出时自动保存** (Ctrl+C 或正常结束), **启动时自动加载上次进度** (从上次的天数继续)。
+
+```python
+from src.core.state_store import StateStore
+store = StateStore()
+if store.exists():
+    store.restore(system)   # 启动加载
+store.save(system)          # 退出保存
+```
+
 ### 角色活动日志
 
 每个角色一份活动日志 (`data/journals/<role_id>.md`, 已 gitignore 不入库), 记录该角色
