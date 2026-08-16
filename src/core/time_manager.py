@@ -503,11 +503,10 @@ class TimeEventBus(EventBus):
     def _register_task_event_if_today(self, task: ScheduledTask) -> bool:
         """当天任务直接注册 TASK_DUE 事件到调度表 (隔天任务不注册).
 
-        隔天任务只保存在 _tasks 列表, 由 _load_today_tasks_to_bus()
-        在目标天 SHIFT_START (上班) 时自动加载到事件调度表.
-
-        幂等: 已注册过的事件 (task.event_id 仍在调度表) 直接跳过, 防止
-        当天任务创建时注册一次 + 上班加载时再注册一次 → 重复提醒.
+        注册时机保证"只注册一次":
+          - 创建时 (schedule_task): 当天任务立即注册; 隔天任务仅保存.
+          - 目标天上班 (_load_today_tasks_to_bus): 只补注册创建时是隔天、
+            尚未注册 (event_id 为空) 的任务.
 
         参数:
             task: ScheduledTask.
@@ -520,7 +519,13 @@ class TimeEventBus(EventBus):
                         "目标天上班时自动加载到事件总线", task.task_id, task.day)
             return False
         if task.event_id and task.event_id in self._tick_schedule:
-            return True  # 已注册, 防重复
+            # 兜底: 正常流程任务只注册一次 (创建时当天注册 / 隔天到期补注册),
+            # 走到这里说明发生了重复注册, 属于运行异常 — 报警不静默
+            logger.warning(
+                "TimeEventBus: 任务 [%s] 已注册事件 %s, 跳过重复注册 "
+                "(正常流程任务只注册一次, 请检查是否重复调用 schedule)",
+                task.task_id, task.event_id)
+            return True
         eid = self.register_event(
             self._task_to_event(task),
             tick=task.absolute_fire_tick(self.ticks_per_day),
@@ -546,20 +551,22 @@ class TimeEventBus(EventBus):
         )
 
     def _load_today_tasks_to_bus(self) -> None:
-        """目标天上班 (SHIFT_START) 时: 把今天到期的任务加载到事件调度表.
+        """目标天上班 (SHIFT_START) 时: 把到期任务加载到事件调度表.
 
-        隔天任务在创建时仅保存在 _tasks 列表, 不注册事件;
-        到达目标天后由本方法统一注册, 与当天任务走同一条事件调度表.
+        只加载创建时是隔天、尚未注册事件的任务 (event_id 为空, 现在已到期):
+        当天任务在创建时已注册过一次, 这里绝不重复注册 (保证只注册一次).
         """
         today = self.day_number()
         loaded = 0
         for task in list(self._tasks.values()):
             if task.fired:
                 continue
-            if task.day <= today and self._register_task_event_if_today(task):
-                loaded += 1
+            # 只补注册"创建时是隔天、现已到期且从未注册"的任务
+            if task.day <= today and not task.event_id:
+                if self._register_task_event_if_today(task):
+                    loaded += 1
         if loaded:
-            logger.info("TimeEventBus: 上班加载 %d 个当天任务到事件总线", loaded)
+            logger.info("TimeEventBus: 上班加载 %d 个到期任务到事件总线", loaded)
 
     def _cancel_task_event(self, task_id: str) -> bool:
         """从事件调度表取消某任务对应的事件 (任务被删除/编辑时)."""
