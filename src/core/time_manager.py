@@ -82,6 +82,7 @@ class ScheduledTask:
     payload: dict[str, Any] = field(default_factory=dict)
     created_at: float = field(default_factory=time_module.time)
     fired: bool = False
+    event_id: str = ""  # 已注册到事件调度表的事件 ID (空 = 未注册, 防重复注册)
 
     def absolute_fire_tick(self, ticks_per_day: int) -> int:
         """计算绝对触发 Tick: (day-1)*ticks_per_day + target_tick."""
@@ -505,6 +506,9 @@ class TimeEventBus(EventBus):
         隔天任务只保存在 _tasks 列表, 由 _load_today_tasks_to_bus()
         在目标天 SHIFT_START (上班) 时自动加载到事件调度表.
 
+        幂等: 已注册过的事件 (task.event_id 仍在调度表) 直接跳过, 防止
+        当天任务创建时注册一次 + 上班加载时再注册一次 → 重复提醒.
+
         参数:
             task: ScheduledTask.
 
@@ -515,10 +519,13 @@ class TimeEventBus(EventBus):
             logger.info("TimeEventBus: 任务 [%s] 是隔天任务 (day %d), 仅保存, "
                         "目标天上班时自动加载到事件总线", task.task_id, task.day)
             return False
-        self.register_event(
+        if task.event_id and task.event_id in self._tick_schedule:
+            return True  # 已注册, 防重复
+        eid = self.register_event(
             self._task_to_event(task),
             tick=task.absolute_fire_tick(self.ticks_per_day),
         )
+        task.event_id = eid
         return True
 
     def _task_to_event(self, task: ScheduledTask) -> Event:
@@ -534,6 +541,7 @@ class TimeEventBus(EventBus):
                 "tick": task.target_tick,
                 "day": task.day,
                 "owner_role": task.owner_role,
+                **task.payload,  # 透传附加信息 (笔记提醒: note_title 等)
             },
         )
 

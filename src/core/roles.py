@@ -73,13 +73,11 @@ def _toolkit_binders() -> dict[str, Callable[[Any, Any], None]]:
         from src.python_tools.mcp_manager import bind_mcp_manager_to_toolkit
         from src.python_tools.memory_toolkit import bind_store_to_toolkit
         from src.python_tools.skill_toolkit import bind_role_to_toolkit as bind_skill
-        from src.python_tools.task_toolkit import bind_role_to_toolkit as bind_task
         from src.python_tools.time_toolkit import bind_time_to_toolkit
 
         _TOOLKIT_BINDERS = {
             "memory":        lambda tk, role: bind_store_to_toolkit(tk, role.note_store, role=role),
             "time":          lambda tk, role: bind_time_to_toolkit(tk, role.time_manager, role=role),
-            "task":          lambda tk, role: bind_task(tk, role),
             "mcp_manager":   lambda tk, role: bind_mcp_manager_to_toolkit(tk, role),
             "skill_manager": lambda tk, role: bind_skill(tk, role),
             "hr":            lambda tk, role: bind_hr(tk, role),
@@ -361,7 +359,9 @@ class AgentRole:
         """
         if self._note_store is None:
             from src.core.note_store import NoteStore
-            self._note_store = NoteStore(role_id=self.role_id, computer=self.computer)
+            self._note_store = NoteStore(role_id=self.role_id,
+                                         computer=self.computer,
+                                         time_manager=self.time_manager)
         return self._note_store
 
     def get_latest_summary(self, before_day: Optional[int] = None) -> Optional[str]:

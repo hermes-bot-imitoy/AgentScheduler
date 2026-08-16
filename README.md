@@ -61,7 +61,7 @@
   - `tick=None` → 立即投递（进 3 层过滤管线）
   - `tick=N` → 存入事件调度表，时间线程到点自动投递
 - 作息事件自动触发：每天 Tick 0 → `SHIFT_START`（上班），Tick 60 → `SHIFT_END`（下班）
-- 定时任务：`schedule_task` 只保存任务列表；当天任务直接注册事件，隔天任务目标天上班时自动加载
+- 笔记与定时任务统一（统称笔记）：`write_note` 填 `remind_tick` = 带提醒的笔记，到点像任务一样发送提醒事件；底层 `schedule_task` 只保存任务列表；当天任务直接注册事件，隔天任务目标天上班时自动加载
 - 兼容别名 `TimeManager` 已于 2026-08 移除（commit `2953835`）——统一使用 `TimeEventBus`
 
 ### 2. 事件 3 层过滤 (`src/core/roles.py` — `AgentRole.evaluate_event`)

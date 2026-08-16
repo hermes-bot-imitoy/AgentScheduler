@@ -93,63 +93,96 @@ def create_memory_toolkit() -> ToolKit:
         return f"第 {day} 天总结已保存: {path}"
 
     def _write_note(args: dict[str, Any]) -> str:
-        """写笔记.
+        """写笔记 (可带提醒时间 = 定时任务).
 
         参数:
-            args: {"title": 笔记标题, "content": 笔记内容}
+            args: {"title": 笔记标题, "content": 笔记内容,
+                   "remind_tick": 提醒Tick(可选, 0~60), "remind_day": 提醒天(可选)}
 
         返回:
-            保存路径.
+            保存路径 (含提醒则附带提醒时间说明).
         """
         title = args.get("title", "").strip()
         content = args.get("content", "")
+        remind_tick = args.get("remind_tick")
+        remind_day = args.get("remind_day")
         if not title:
             return "错误: 'title' (笔记标题) 为必填参数."
 
         store = _get_store()
         role = _get_role()
-        path = store.write_note(title, content)
+        try:
+            path = store.write_note(title, content,
+                                    remind_tick=remind_tick,
+                                    remind_day=remind_day)
+        except ValueError as exc:
+            return f"错误: {exc}"
         # 上下文更新: 新笔记 → 写入角色活动日志
         if role is not None:
-            role.journal(f"写入笔记: {title}")
+            role.journal(f"写入笔记: {title}"
+                         + (f" (提醒: 第 {remind_day or role.time_manager.day_number()} 天 Tick {remind_tick})"
+                            if remind_tick is not None else ""))
+        if remind_tick is not None:
+            r = store.get_reminder(title)
+            day, tick = (r["day"], r["tick"]) if r else (remind_day or 1, remind_tick)
+            return f"笔记已保存并设置提醒: {path} (将在第 {day} 天 Tick {tick} 提醒你处理)"
         return f"笔记已保存: {path}"
 
     def _edit_note(args: dict[str, Any]) -> str:
-        """编辑已有笔记 (覆盖内容). 不存在则创建.
+        """编辑已有笔记 (覆盖内容). 不存在则创建. 提供 remind_tick 则重置提醒.
 
         参数:
-            args: {"title": 笔记标题, "content": 新内容}
+            args: {"title": 笔记标题, "content": 新内容,
+                   "remind_tick": 新的提醒Tick(可选), "remind_day": 新的提醒天(可选)}
 
         返回:
             保存路径.
         """
         title = args.get("title", "").strip()
         content = args.get("content", "")
+        remind_tick = args.get("remind_tick")
+        remind_day = args.get("remind_day")
         if not title:
             return "错误: 'title' (笔记标题) 为必填参数."
 
         store = _get_store()
         role = _get_role()
-        path = store.edit_note(title, content)
+        try:
+            path = store.edit_note(title, content,
+                                   remind_tick=remind_tick,
+                                   remind_day=remind_day)
+        except ValueError as exc:
+            return f"错误: {exc}"
         # 上下文更新: 笔记被编辑 → 写入角色活动日志
         if role is not None:
             role.journal(f"更新笔记: {title}")
+        if remind_tick is not None:
+            r = store.get_reminder(title)
+            day, tick = (r["day"], r["tick"]) if r else (remind_day or 1, remind_tick)
+            return f"笔记已更新并重置提醒: {path} (将在第 {day} 天 Tick {tick} 提醒你处理)"
         return f"笔记已更新: {path}"
 
     def _list_notes(args: dict[str, Any]) -> str:
-        """列出所有笔记标题.
+        """列出所有笔记标题 (含提醒时间信息, 若有).
 
         参数:
             args: 无.
 
         返回:
-            笔记标题列表 (每行一个).
+            笔记标题列表 (每行一个; 带提醒的标注提醒时间).
         """
         store = _get_store()
         titles = store.list_notes()
         if not titles:
             return "(暂无笔记)"
-        return "\n".join(f"- {t}" for t in titles)
+        lines = []
+        for t in titles:
+            r = store.get_reminder(t)
+            if r is not None:
+                lines.append(f"- {t} (提醒: 第 {r['day']} 天 Tick {r['tick']})")
+            else:
+                lines.append(f"- {t}")
+        return "\n".join(lines)
 
     def _read_note(args: dict[str, Any]) -> str:
         """读取笔记内容.
@@ -189,12 +222,19 @@ def create_memory_toolkit() -> ToolKit:
 
     tk.add_python_tool(
         name="write_note",
-        description="写一篇笔记. 用于记录重要信息, 决策依据, 或需要长期保存的内容.",
+        description=(
+            "写一篇笔记 (笔记与定时任务已统一). 用于记录信息 / 决策依据 / 待办事项. "
+            "可填 remind_tick 设置提醒时间 (可选): 到点系统会像任务一样提醒你处理, "
+            "不填就是普通笔记. "
+            "示例: write_note('写周报', '本周工作小结', remind_tick=50) = 在 Tick 50 提醒我写周报."
+        ),
         input_schema={
             "type": "object",
             "properties": {
                 "title": {"type": "string", "description": "笔记标题"},
-                "content": {"type": "string", "description": "笔记内容"},
+                "content": {"type": "string", "description": "笔记内容 (待办/记录/计划等)"},
+                "remind_tick": {"type": "integer", "description": "提醒 Tick (可选, 0~60, 0=上班 60=下班; 填了则到点提醒你)"},
+                "remind_day": {"type": "integer", "description": "提醒触发天 (可选, 默认今天, 可设未来天)"},
             },
             "required": ["title", "content"],
         },
@@ -203,12 +243,18 @@ def create_memory_toolkit() -> ToolKit:
 
     tk.add_python_tool(
         name="edit_note",
-        description="编辑已有笔记 (覆盖原内容). 笔记不存在时会自动创建.",
+        description=(
+            "编辑已有笔记 (覆盖原内容). 笔记不存在时自动创建. "
+            "提供 remind_tick 可重置提醒时间 (可选); 不提供则保留原提醒. "
+            "删除提醒请用 delete_note."
+        ),
         input_schema={
             "type": "object",
             "properties": {
                 "title": {"type": "string", "description": "笔记标题"},
                 "content": {"type": "string", "description": "新的笔记内容"},
+                "remind_tick": {"type": "integer", "description": "新的提醒 Tick (可选, 0~60; 提供则重置提醒)"},
+                "remind_day": {"type": "integer", "description": "新的提醒触发天 (可选)"},
             },
             "required": ["title", "content"],
         },
@@ -217,7 +263,7 @@ def create_memory_toolkit() -> ToolKit:
 
     tk.add_python_tool(
         name="list_notes",
-        description="列出当前所有笔记的标题列表.",
+        description="列出当前所有笔记 (含提醒时间信息, 若有).",
         input_schema={"type": "object", "properties": {}},
         handler=_list_notes,
     )

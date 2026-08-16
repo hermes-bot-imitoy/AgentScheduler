@@ -161,21 +161,25 @@ tm.stop()
 
 ## 存储
 
-### `NoteStore` — 文件笔记与总结
+### `NoteStore` — 笔记 (含提醒 = 定时任务统一) 与总结
 文件: `src/core/note_store.py`。每角色独立目录（有个人电脑时在电脑工作目录
 `<workdir>/notes/`，否则本地 `data/notes/<role_id>/`）。
 
+**笔记与定时任务已统一**: 笔记 = 内容 + 可选提醒时间。`write_note` 填入
+`remind_tick` 后, 到点系统像任务一样向该角色发送提醒事件 (TASK_DUE)。
+
 ```python
-NoteStore(base_dir="./data/notes", role_id="", computer=None)
+NoteStore(base_dir="./data/notes", role_id="", computer=None, time_manager=None)
 ```
 
 | 方法 | 参数 | 返回 | 说明 |
 |------|------|------|------|
-| `write_note(title, content)` | str,str | str(路径) | 写笔记（存在则覆盖；标题清洗 shell 元字符） |
-| `edit_note(title, content)` | str,str | str(路径) | 编辑笔记（不存在则创建） |
+| `write_note(title, content, remind_tick=None, remind_day=None)` | str,str,int\|None,int\|None | str(路径) | 写笔记（存在则覆盖；`remind_tick` 填了则注册提醒，到点发事件） |
+| `edit_note(title, content, remind_tick=None, remind_day=None)` | str,str,int\|None,int\|None | str(路径) | 编辑笔记（提供 `remind_tick` 则重置提醒，否则保留原提醒） |
 | `list_notes()` | — | list[str] | 笔记标题列表（不含总结） |
 | `read_note(title)` | str | Optional[str] | 读笔记，不存在返回 None |
-| `delete_note(title)` | str | bool | 删笔记（真实删除文件） |
+| `delete_note(title)` | str | bool | 删笔记（真实删除文件 + 取消关联提醒） |
+| `get_reminder(title)` | str | Optional[dict] | 查询笔记提醒 `{"day", "tick"}`，无提醒返回 None |
 | `save_summary(content, day=None)` | str,int\|None | str(路径) | 保存第 N 天总结 `_summary_day_N.md` |
 | `get_summary(day=None)` | int\|None | Optional[str] | 读指定天总结 |
 | `get_latest_summary(before_day=None)` | int\|None | Optional[str] | 最近一次总结（严格早于 before_day） |
@@ -381,9 +385,8 @@ tk.tool_names / tk.tool_count / tk.get_tool(name) / __iter__ / __contains__
 |--------|------|------|
 | `talk_toolkit` | `talk(target, message, urgency)` | 角色间异步通信（投递到对方队列） |
 | `hr_toolkit` | `post_job_posting(requirement)` / `list_candidates()` | 发布招聘启事 / 列出候选人（后台完成新角色创建与入职登记） |
-| `memory_toolkit` | `summary(content, day)` / `write_note(title, content)` / `edit_note` / `list_notes` / `read_note` | 每日总结（保存后切 OFF_DUTY）+ 笔记 |
+| `memory_toolkit` | `summary(content, day)` / `write_note(title, content, remind_tick, remind_day)` / `edit_note` / `list_notes` / `read_note` | 每日总结（保存后切 OFF_DUTY）+ 笔记（**带 remind_tick = 定时提醒**，已合并原定时任务工具） |
 | `time_toolkit` | `get_time()` / `take_rest()` | 查看作息时间 / 休息（无参数, 进入 ON_DUTY_IDLE, 事件自动唤醒） |
-| `task_toolkit` | `create_task(description, tick, day)` / `list_tasks()` / `edit_task(task_id, ...)` / `delete_task(task_id)` | 定时任务（Tick 提醒，定向投递） |
 | `mcp_manager` | `mcp_search(keyword)` / `mcp_list()` / `mcp_add(tool_name)` / `mcp_remove(tool_name)` / `mcp_my_tools()` | MCP 工具自助管理（搜索/添加/移除本地 MCP 工具，角色自动装配） |
 | `client_toolkit` | `talk_to_client(message)` | 与甲方实时交流（阻塞等待用户输入） |
 
@@ -391,7 +394,6 @@ tk.tool_names / tk.tool_count / tk.get_tool(name) / __iter__ / __contains__
 ceo = system.get_role("ceo")
 ceo.add_toolkit(create_client_toolkit())          # 甲方工具
 ceo.add_toolkit(create_memory_toolkit())          # 总结/笔记 (add_toolkit 自动绑定)
-ceo.add_toolkit(create_task_toolkit())            # 定时任务
 ```
 
 ---
@@ -471,9 +473,9 @@ system.trigger(Event(source="client", event_type="requirements",
                      priority=Priority.HIGH, target_role="ceo",
                      payload={"instruction": "收集需求"}))
 
-# CEO 定时任务: 第 2 天 Tick 30 提醒
-system.time_manager.schedule_task("开始写周报", owner_role="ceo",
-                                  target_tick=30, day=2)
+# CEO 笔记提醒: 第 2 天 Tick 30 (笔记与定时任务统一)
+system.get_role("ceo").note_store.write_note(
+    "开始写周报", "周报模板与本周工作小结", remind_tick=30, remind_day=2)
 
 print(system.describe(), system.get_status())
 system.stop()

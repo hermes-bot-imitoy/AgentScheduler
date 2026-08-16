@@ -26,7 +26,6 @@
 from typing import Callable
 
 from src.python_tools.memory_toolkit import create_memory_toolkit
-from src.python_tools.task_toolkit import create_task_toolkit
 from src.python_tools.time_toolkit import create_time_toolkit
 from src.python_tools.mcp_manager import MCPManager, create_mcp_manager_toolkit
 from src.python_tools.computer_toolkit import create_computer_toolkit
@@ -42,10 +41,11 @@ _SKILL_MANAGER = SkillManager()
 
 # 默认工具类注册表: {名称: 工厂函数}
 # 角色被添加进 AgentSystem 时 (auto_toolkits=True) 自动逐个加载.
+# 注: 定时任务工具已并入笔记 (write_note 的 remind_tick 参数 = 定时提醒),
+# 不再单独提供 create_task 工具 — 笔记与任务统一为"笔记"概念.
 DEFAULT_TOOLKITS: dict[str, Callable[[], object]] = {
-    "memory": create_memory_toolkit,
+    "memory": create_memory_toolkit,   # 笔记 (含提醒=定时任务) / 总结
     "time": create_time_toolkit,
-    "task": create_task_toolkit,
     "computer": create_computer_toolkit,          # run_command / computer_status / reboot
     "mcp_manager": lambda: create_mcp_manager_toolkit(_MCP_MANAGER),
     "skill_manager": lambda: create_skill_manager_toolkit(_SKILL_MANAGER),

@@ -145,14 +145,14 @@ def run_one_day(system: AgentSystem, day: int, with_client_task: bool) -> None:
 
     # ── 第 1 天: CEO 与甲方沟通 (仅此一次) ─────────────────
     if with_client_task:
-        step("CEO 注册开局任务: Tick 1 (10 分钟后) 与用户沟通项目要求...")
-        task = system.time_manager.schedule_task(
-            description="与用户沟通项目要求, 收集今天要开发的项目需求",
-            owner_role="CEO",
-            target_tick=1,
-            day=day,
+        step("CEO 注册开局笔记提醒: Tick 1 (10 分钟后) 与用户沟通项目要求...")
+        ceo_note = system.get_role("CEO").note_store.write_note(
+            title="第1天-收集项目需求",
+            content="与用户沟通项目要求, 收集今天要开发的项目需求",
+            remind_tick=1,
+            remind_day=day,
         )
-        ok(f"任务已注册 [ID={task.task_id}]: 第 {day} 天 Tick 1 → CEO")
+        ok(f"笔记+提醒已注册: {ceo_note} (第 {day} 天 Tick 1 → CEO)")
 
         step("等待 Tick 1 触发 (CEO 任务 → 与用户沟通)...")
         fire_tick = (day - 1) * 144 + 1
