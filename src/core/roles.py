@@ -73,7 +73,9 @@ def _toolkit_binders() -> dict[str, Callable[[Any, Any], None]]:
         from src.python_tools.mcp_manager import bind_mcp_manager_to_toolkit
         from src.python_tools.memory_toolkit import bind_store_to_toolkit
         from src.python_tools.skill_toolkit import bind_role_to_toolkit as bind_skill
+        from src.python_tools.task_view_toolkit import bind_role_to_toolkit as bind_task_view
         from src.python_tools.time_toolkit import bind_time_to_toolkit
+        from src.python_tools.todo_toolkit import bind_todo_to_toolkit
 
         _TOOLKIT_BINDERS = {
             "memory":        lambda tk, role: bind_store_to_toolkit(tk, role.note_store, role=role),
@@ -82,6 +84,8 @@ def _toolkit_binders() -> dict[str, Callable[[Any, Any], None]]:
             "skill_manager": lambda tk, role: bind_skill(tk, role),
             "hr":            lambda tk, role: bind_hr(tk, role),
             "computer":      lambda tk, role: bind_computer_to_toolkit(tk, role),
+            "todo":          lambda tk, role: bind_todo_to_toolkit(tk, role.todo_store),
+            "task_view":     lambda tk, role: bind_task_view(tk, role),
         }
     return _TOOLKIT_BINDERS
 
@@ -150,7 +154,8 @@ class AgentRole:
     _llm: Optional[Any] = field(default=None, repr=False, init=False)  # LLM 客户端 (DeepSeekLLM/OllamaLLM), lazy init
     _tools: Any = field(default=None, repr=False, init=False)  # ToolRegistry, lazy init
     _pool: Any = field(default=None, repr=False, init=False)   # RolePool back-reference for talk
-    _note_store: Any = field(default=None, repr=False, init=False)  # NoteStore, lazy init
+    _note_store: Any = field(default=None, repr=False, init=False)   # NoteStore, lazy init
+    _todo_store: Any = field(default=None, repr=False, init=False)   # TodoStore, lazy init
     _time_manager: Any = field(default=None, repr=False, init=False)  # TimeEventBus, lazy init
     _computer: Any = field(default=None, repr=False, init=False)  # Computer, lazy init (角色添加时自动创建)
 
@@ -374,6 +379,17 @@ class AgentRole:
             最近总结内容, 没有则返回 None.
         """
         return self.note_store.get_latest_summary(before_day)
+
+    @property
+    def todo_store(self) -> Any:
+        """获取该角色的 Todo 清单存储 (惰性初始化, data/todos/<role_id>.json).
+
+        每角色独立清单, 支持添加/更新状态/删除/列出 (TodoStore).
+        """
+        if self._todo_store is None:
+            from src.core.todo_store import TodoStore
+            self._todo_store = TodoStore(role_id=self.role_id)
+        return self._todo_store
 
     # ── 活动日志 (journal) ───────────────────────────────
 
