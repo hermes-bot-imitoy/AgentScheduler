@@ -685,7 +685,12 @@ class RolePool:
     def __init__(self, llm_api_key: Optional[str] = None, llm_model: Optional[str] = None,
                  llm_provider: Optional[str] = None, time_manager: Any = None):
         self._roles: dict[str, AgentRole] = {}
-        self._executor = ThreadPoolExecutor(thread_name_prefix="role-")
+        # 每角色一个常驻 worker 线程 (角色空闲时 sleep 轮询, 线程不退出).
+        # max_workers 必须 ≥ 最大角色数: 默认值 min(32, cpu+4) 只有 28,
+        # 40 个角色时后注册的 12 个 worker 永远排不到线程 → 日志停在
+        # "收到任务" 无后续 (曾被误判为 API 限速).
+        self._executor = ThreadPoolExecutor(
+            max_workers=64, thread_name_prefix="role-")
         self._futures: dict[str, Future] = {}
         self._shutdown_flag = threading.Event()
         self._llm_api_key = llm_api_key
