@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from typing import Optional
 
 import requests
@@ -36,6 +37,15 @@ OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma4:e2b-it-q4_K_M")
 
 DEFAULT_MAX_TOKENS = 512
 DEFAULT_TEMPERATURE = 0.7
+
+# ── 请求失败重试 (用户指定) ────────────────────────────────
+# 本 Agent 并发请求量大, 开局阶段易触发限速 (429/5xx/超时).
+# 规则: 可恢复错误等 API_RETRY_DELAY 秒 (10s) 重试, 最多 API_RETRY_MAX 次
+# (200 次 — 请求量大需要足够耐心); 重试耗尽放弃本次请求 (任务标记失败),
+# 不再无限等待. 不可恢复的客户端错误 (400/401/403/404 等) 不重试.
+API_RETRY_DELAY = 10.0   # 失败后的重试间隔秒数
+API_RETRY_MAX = 200      # 最大重试次数
+API_TIMEOUT = 120        # 单次请求超时秒数
 
 
 # ── 共享基类: OpenAI 兼容客户端 ─────────────────────────────
@@ -86,6 +96,8 @@ class OpenAICompatLLM:
         self.model = model or os.environ.get(self.MODEL_ENV, self.DEFAULT_MODEL)
         # 角色标识: DEBUG 日志前缀, 便于多角色并发时区分是谁在调 API
         self.label = label or ""
+        # 最近一次请求失败原因 (重试耗尽/不可恢复错误时诊断用)
+        self._retry_error = ""
 
         if self.REQUIRES_API_KEY and not self.api_key:
             raise ValueError(
@@ -175,6 +187,66 @@ class OpenAICompatLLM:
         """
         return
 
+    def _post_with_retry(self, url: str, payload: dict,
+                         headers: dict) -> Optional[dict]:
+        """发送 POST 请求, 失败自动重试 (限速/超时/5xx 等可恢复错误).
+
+        规则 (用户指定, 本 Agent 并发请求量大):
+          - 可恢复错误 (HTTP 429 限速 / 5xx / 超时 / 连接错误) → 等
+            API_RETRY_DELAY 秒 (10s) 后重试, 最多 API_RETRY_MAX 次 (200)
+          - 不可恢复错误 (400/401/403/404 等客户端错误) → 立即放弃, 不重试
+          - 重试耗尽 → 放弃本次请求 (返回 None, 调用方转成 "[API error: ...]"
+            错误文本 → 上层任务标记失败, 不再无限等待)
+
+        参数:
+            url:     chat/completions 端点.
+            payload: 请求体.
+            headers: 请求头.
+
+        返回:
+            响应 JSON dict; 放弃时返回 None (原因在 self._retry_error).
+        """
+        last_err = ""
+        for attempt in range(1, API_RETRY_MAX + 1):
+            try:
+                resp = requests.post(url, json=payload, headers=headers,
+                                     timeout=API_TIMEOUT)
+                if resp.status_code == 429 or resp.status_code >= 500:
+                    # 限速/服务端错误: 可恢复, 等 10s 重试
+                    last_err = f"HTTP {resp.status_code}"
+                    logger.warning(
+                        "%s API 请求失败 (%s, 第 %d/%d 次), %.0fs 后重试",
+                        self.API_NAME, last_err, attempt, API_RETRY_MAX,
+                        API_RETRY_DELAY)
+                    time.sleep(API_RETRY_DELAY)
+                    continue
+                resp.raise_for_status()
+                return resp.json()
+            except requests.exceptions.Timeout:
+                last_err = "timeout"
+                logger.warning(
+                    "%s API 请求超时 (第 %d/%d 次), %.0fs 后重试",
+                    self.API_NAME, attempt, API_RETRY_MAX, API_RETRY_DELAY)
+                time.sleep(API_RETRY_DELAY)
+            except requests.exceptions.HTTPError as e:
+                # 4xx 客户端错误 (非 429): 重试无意义, 立即放弃
+                self._retry_error = str(e)
+                logger.error("%s API 请求失败, 不可恢复: %s", self.API_NAME, e)
+                return None
+            except requests.exceptions.RequestException as e:
+                # 连接错误/其他网络问题: 可恢复, 重试
+                last_err = str(e)
+                logger.warning(
+                    "%s API 请求错误 (%s, 第 %d/%d 次), %.0fs 后重试",
+                    self.API_NAME, last_err[:120], attempt, API_RETRY_MAX,
+                    API_RETRY_DELAY)
+                time.sleep(API_RETRY_DELAY)
+        # 重试耗尽: 放弃本次请求 (上层把错误文本标记为任务失败)
+        self._retry_error = f"重试 {API_RETRY_MAX} 次仍失败: {last_err}"
+        logger.error("%s API 请求失败 %d 次, 放弃: %s",
+                     self.API_NAME, API_RETRY_MAX, last_err)
+        return None
+
     def _call_api(
         self,
         messages: list[dict[str, str]],
@@ -205,16 +277,11 @@ class OpenAICompatLLM:
             self.API_NAME, self.model, len(messages),
         )
 
-        try:
-            resp = requests.post(url, json=payload, headers=headers, timeout=120)
-            resp.raise_for_status()
-            data = resp.json()
-        except requests.exceptions.Timeout:
-            logger.error("%s API timeout", self.API_NAME)
-            return "[API timeout]", None
-        except requests.exceptions.RequestException as e:
-            logger.error("%s API error: %s", self.API_NAME, e)
-            return f"[API error: {e}]", None
+        data = self._post_with_retry(url, payload, headers)
+        if data is None:
+            # 重试耗尽/不可恢复: 转成错误文本 (roles.py 的 LLM_ERROR_MARKERS
+            # 据此把任务标记为失败, 不再无限等待)
+            return f"[API error: {self._retry_error}]", None
 
         choice = data.get("choices", [{}])[0]
         message = choice.get("message", {})
@@ -297,16 +364,10 @@ class OpenAICompatLLM:
             self.API_NAME, self.model, len(messages), len(tools),
         )
 
-        try:
-            resp = requests.post(url, json=payload, headers=headers, timeout=120)
-            resp.raise_for_status()
-            data = resp.json()
-        except requests.exceptions.Timeout:
-            logger.error("%s API timeout", self.API_NAME)
-            return "[API timeout]", [], None
-        except requests.exceptions.RequestException as e:
-            logger.error("%s API error: %s", self.API_NAME, e)
-            return f"[API error: {e}]", [], None
+        data = self._post_with_retry(url, payload, headers)
+        if data is None:
+            # 重试耗尽/不可恢复: 转成错误文本 (任务标记失败)
+            return f"[API error: {self._retry_error}]", [], None
 
         choice = data.get("choices", [{}])[0]
         message = choice.get("message", {})
