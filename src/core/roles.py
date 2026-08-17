@@ -515,7 +515,8 @@ class AgentRole:
         """进入 WAIT 状态: 记录原状态, 标记在等 target_id 的 talk 回复.
 
         参数:
-            target_id: 正在等待其回复的角色 role_id.
+            target_id: 正在等待其回复的角色的 role_id (程序内部统一用
+                       role_id 判断等待链/回复投递; 人名仅作为 LLM 参数).
         """
         self._waiting_reply_from = target_id
         self._state_before_wait = self.state

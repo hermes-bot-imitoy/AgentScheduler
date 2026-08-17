@@ -142,13 +142,13 @@ def create_talk_toolkit(pool: Any) -> ToolKit:
         # ── 1) 回复投递: 目标正处于 WAIT 且在等我回复 → 直接投递唤醒 ──
         #    等待者 worker 阻塞中, 回复绝不能入队 (否则永远收不到);
         #    wait 参数在此被忽略 — 回复本身不进入等待, 从根上拆解双向互等.
-        if (target_role.state == AgentState.WAIT
-                and target_role._waiting_reply_from == sender_id):
+        if target_role.state == AgentState.WAIT \
+                and target_role._waiting_reply_from == sender_id:
             target_role._deliver_reply(message)
             if sender is not None:
                 sender.journal(
-                    f"回复了等待中的 {target_role.name} ({target}): {message[:80]}")
-            return f"已回复给正在等待的 {target_role.name} ({target})."
+                    f"回复了等待中的 {target_role.name}: {message[:80]}")
+            return f"已回复给正在等待的 {target_role.name}."
 
         task = Task(
             urgency=urgency,
@@ -167,27 +167,28 @@ def create_talk_toolkit(pool: Any) -> ToolKit:
                 return ("错误: 检测到互相等待死锁 (对方的等待链成环回到你)。"
                         "请勿使用 wait=true, 改为普通消息或稍后再询问。")
             # 先进入 WAIT 再发消息: 防止对方秒回时回复投递条件不成立 (竞态)
-            sender._begin_wait(target)
+            # 等待链统一用 role_id 判断 (LLM 参数用人名, 程序内部用 role_id)
+            sender._begin_wait(target_role.role_id)
             try:
                 target_role.add_task(task)
                 sender.journal(
-                    f"发消息给 {target_role.name} ({target}, {urgency.name}, 等待回复): "
+                    f"发消息给 {target_role.name} ({urgency.name}, 等待回复): "
                     f"{message[:80]}")
                 reply = sender._wait_for_reply(TALK_WAIT_TIMEOUT)
             finally:
                 sender._end_wait()
             if reply is None:
-                return (f"等待 {target_role.name} ({target}) 回复超时 "
+                return (f"等待 {target_role.name} 回复超时 "
                         f"({TALK_WAIT_TIMEOUT:.0f}s), 未收到回复。")
-            return f"已收到 {target_role.name} ({target}) 的回复: {reply}"
+            return f"已收到 {target_role.name} 的回复: {reply}"
 
         # ── 3) 普通消息: 入目标队列, 立即返回 ──
         target_role.add_task(task)
         if sender is not None:
             sender.journal(
-                f"发消息给 {target_role.name} ({target}, {urgency.name}): {message[:80]}")
+                f"发消息给 {target_role.name} ({urgency.name}): {message[:80]}")
         return (
-            f"消息已发送给 {target_role.name} ({target}), 紧急度={urgency.name}, "
+            f"消息已发送给 {target_role.name}, 紧急度={urgency.name}, "
             f"对方队列现有 {target_role.queue_depth} 个任务."
         )
 

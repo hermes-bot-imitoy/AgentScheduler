@@ -109,8 +109,50 @@ def test_wait_roundtrip(tmp_path, monkeypatch):
         pool.shutdown(wait=False)
 
     assert not t.is_alive()
-    assert "已收到 角色B (B) 的回复: 进度 80%" in result["text"]
+    assert "已收到 角色B 的回复: 进度 80%" in result["text"]
     assert role_a.state.value == "ON_DUTY_IDLE"   # 状态恢复
+
+
+def test_wait_roundtrip_with_real_names(tmp_path, monkeypatch):
+    """真实 LLM 场景: name ≠ role_id (如 王建国/architect), target 用人名.
+
+    回归: _begin_wait 曾存人名导致回复投递条件 (role_id 比较) 永不成立,
+    A 干等 120s 超时 — 修复后等待链统一用 role_id, 人名仅作 LLM 参数.
+    """
+    monkeypatch.setattr("src.core.roles.JOURNAL_DIR", tmp_path)
+    pool = RolePool()
+    a = AgentRole(name="王建国", role_id="architect")
+    b = AgentRole(name="郭晓东", role_id="tester_1")
+    pool.add_role(a)
+    pool.add_role(b)
+    tks = {}
+    for r in (a, b):
+        tk = create_talk_toolkit(pool)
+        tk._role_holder = {"role": r}  # type: ignore[attr-defined]
+        tks[r.role_id] = tk
+
+    result = {}
+
+    def sender():
+        # A (architect/王建国) 用人名 "郭晓东" 发 wait=true
+        result["text"] = _talk(tks, "architect", "郭晓东", "进度?", wait=True)
+
+    t = threading.Thread(target=sender)
+    t.start()
+    try:
+        assert _wait_until(lambda: a.state.value == "WAIT"), "A 未进入 WAIT"
+        assert a._waiting_reply_from == "tester_1"   # 内部等待链存 role_id
+        # B (tester_1/郭晓东) 用人名 "王建国" 回复 → 应直接投递唤醒
+        reply = _talk(tks, "tester_1", "王建国", "进度 80%")
+        assert "已回复给正在等待的" in reply
+        t.join(timeout=5)
+    finally:
+        t.join(timeout=1)
+        pool.shutdown(wait=False)
+
+    assert not t.is_alive()
+    assert "已收到 郭晓东 的回复: 进度 80%" in result["text"]
+    assert a.state.value == "ON_DUTY_IDLE"
 
 
 # ── 2) 双向互等拆解 ───────────────────────────────────────
