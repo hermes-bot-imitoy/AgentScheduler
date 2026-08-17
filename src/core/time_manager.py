@@ -36,7 +36,7 @@ import threading
 import time as time_module
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Callable, Optional
 
 from src.core.event_bus import EventBus
@@ -102,11 +102,14 @@ class TimeEventBus(EventBus):
       - tick=None: 立即触发 (进入 3 层过滤管线)
       - tick=整数: 在指定绝对 Tick 触发 (时间线程到期自动投递)
 
-    系统启动时刻记为 Tick 0 / 第 1 天, 之后按 elapsed 时间推进 Tick,
-    不依赖任何硬编码的墙钟时间.
+    Tick 推进规则 (事件驱动, 不随真实时间流逝):
+      - Tick 只在"全部角色空闲持续 idle_seconds 秒"时快进跳变 (有任务跳任务,
+        没任务跳下班/次日上班); 角色忙碌期间 Tick 冻结 — LLM 在 1 Tick 内
+        跑完内容, 不会因处理耗时错过未来 Tick 的任务.
+      - 系统启动时刻记为 Tick 0 / 第 1 天.
 
     参数:
-        minutes_per_tick: 每个 Tick 的分钟数 (默认 10)
+        minutes_per_tick: 每个 Tick 的分钟数 (默认 10, 仅用于 tick↔时钟换算)
         shift_start_tick: 上班 Tick (默认 0)
         shift_end_tick:   下班 Tick (默认 60)
         ticks_per_day:    每天总 Tick 数 (默认 144)
@@ -120,7 +123,7 @@ class TimeEventBus(EventBus):
     check_interval: float = DEFAULT_CHECK_INTERVAL  # 支持小数秒 (测试用短间隔加速)
 
     # 内部状态
-    _start_dt: Optional[datetime] = field(default=None, repr=False, init=False)  # 启动时刻
+    _tick: int = field(default=0, repr=False, init=False)  # 当前绝对 Tick (显式状态, 快进时跳变)
     _thread: Optional[threading.Thread] = field(default=None, repr=False, init=False)
     _running: bool = field(default=False, repr=False, init=False)
     _event_sender: Optional[Callable[[Event], None]] = field(default=None, repr=False, init=False)
@@ -254,8 +257,8 @@ class TimeEventBus(EventBus):
             return
 
         # 时钟基准前移: 使 elapsed 恰好等于 target Tick 对应的秒数
-        self._start_dt = self._clock() - timedelta(
-            seconds=target * self.minutes_per_tick * 60)
+        # (Tick 是显式状态 — 直接跳到目标, 不依赖真实时间流逝)
+        self._tick = target
         self._idle_since = None
         logger.debug("全部角色已空闲 %.0fs, 快进到下一个事件 Tick %d (原 %d)",
                      self._idle_seconds, target, now)
@@ -307,19 +310,16 @@ class TimeEventBus(EventBus):
 
     # ── 核心方法 ──────────────────────────────────────────
 
-    def _elapsed_seconds(self) -> float:
-        """自系统启动以来的秒数 (基于注入时钟)."""
-        if self._start_dt is None:
-            return 0.0
-        return max(0.0, (self._clock() - self._start_dt).total_seconds())
-
     def current_tick(self) -> int:
         """获取当前 Tick 数 (自系统启动累计, 启动即为 0).
+
+        Tick 是显式状态, 不随真实时间流逝自动推进; 仅在全部角色空闲时
+        由快进机制跳变到下一个事件 Tick.
 
         返回:
             当前 Tick 数.
         """
-        return int(self._elapsed_seconds() // (self.minutes_per_tick * 60))
+        return self._tick
 
     def day_number(self) -> int:
         """获取当前是第几天 (系统启动当天为第 1 天).
@@ -327,7 +327,7 @@ class TimeEventBus(EventBus):
         返回:
             天序号 (>= 1).
         """
-        return int(self._elapsed_seconds() // (self.ticks_per_day * self.minutes_per_tick * 60)) + 1
+        return self._tick // self.ticks_per_day + 1
 
     def tick_of_day(self) -> int:
         """获取今天内的 Tick 位置 (0 ~ ticks_per_day-1).
@@ -335,7 +335,7 @@ class TimeEventBus(EventBus):
         返回:
             今日内 Tick 数.
         """
-        return self.current_tick() % self.ticks_per_day
+        return self._tick % self.ticks_per_day
 
     def tick_to_time(self, tick: int) -> str:
         """将 Tick 转换为相对时钟 "HH:MM" (从每天第 0 Tick 起算).
@@ -407,19 +407,17 @@ class TimeEventBus(EventBus):
         """
         if self._running:
             return
-        self._start_dt = self._clock()
+        self._tick = 0
         self._running = True
         self._fired_day = 0
         self._fired_start = False
         self._fired_end = False
-        # 恢复上次进度 (StateStore): 时钟前移到目标绝对 Tick, 事件标志按
+        # 恢复上次进度 (StateStore): Tick 直接跳到恢复点, 事件标志按
         # 恢复点设置 — 当天上班视为已发生, 下班按 tick 位置决定
         if self._pending_progress is not None:
             day, tod = self._pending_progress
             self._pending_progress = None
-            target = (day - 1) * self.ticks_per_day + tod
-            self._start_dt = self._clock() - timedelta(
-                seconds=target * self.minutes_per_tick * 60)
+            self._tick = (day - 1) * self.ticks_per_day + tod
             self._fired_day = day
             self._fired_start = True   # 恢复点必在上班区间内 (上班已发生)
             self._fired_end = tod >= self.shift_end_tick
@@ -432,9 +430,9 @@ class TimeEventBus(EventBus):
                     self.check_interval)
 
     def set_progress(self, day: int, tick_of_day: int) -> None:
-        """设置恢复进度: 下次 start() 时把时钟前移到 (day, tick_of_day).
+        """设置恢复进度: 下次 start() 时把 Tick 直接设为 (day, tick_of_day).
 
-        用于 StateStore 重启恢复上次进度 (启动加载存档). 必须在 start() 之前调用.
+        用于 StateStore 重启恢复上次进度. 必须在 start() 前调用.
 
         参数:
             day: 第几天 (>= 1).

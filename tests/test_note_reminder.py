@@ -20,7 +20,7 @@ from src.core.time_manager import TimeEventBus
 
 
 class _FakeClock:
-    """可推进的假时钟 (TimeEventBus 测试用)."""
+    """可推进的假时钟 (兼容保留; Tick 现为显式状态, 测试直接用 _tick 跳变)."""
 
     def __init__(self, start: datetime | None = None):
         self.t = start or datetime(2026, 1, 1, 9, 0)
@@ -32,15 +32,18 @@ class _FakeClock:
         self.t += timedelta(minutes=minutes)
 
 
-def _make_tm(clock: _FakeClock) -> TimeEventBus:
-    tm = TimeEventBus(check_interval=0.05)
-    tm.set_clock(clock)
-    return tm
+def _make_tm() -> TimeEventBus:
+    return TimeEventBus(check_interval=0.05)
+
+
+def _jump_tick(tm: TimeEventBus, tick: int) -> None:
+    """直接跳到指定绝对 Tick (等价于快进跳变)."""
+    tm._tick = tick
 
 
 def test_write_note_with_reminder(tmp_path):
     """write_note 带 remind_tick → 注册提醒 (payload 携带笔记标题)."""
-    tm = _make_tm(_FakeClock())
+    tm = _make_tm()
     store = NoteStore(role_id="tester_1", time_manager=tm)
     store.write_note("写周报", "本周工作小结", remind_tick=50)
 
@@ -55,7 +58,7 @@ def test_write_note_with_reminder(tmp_path):
 
 def test_write_note_without_reminder(tmp_path):
     """不带 remind_tick → 普通笔记, 无提醒."""
-    tm = _make_tm(_FakeClock())
+    tm = _make_tm()
     store = NoteStore(role_id="tester_1", time_manager=tm)
     store.write_note("普通笔记", "没有提醒")
     assert tm.list_tasks(owner_role="tester_1") == []
@@ -64,7 +67,7 @@ def test_write_note_without_reminder(tmp_path):
 
 def test_delete_note_cancels_reminder(tmp_path):
     """删除带提醒的笔记 → 提醒一并取消."""
-    tm = _make_tm(_FakeClock())
+    tm = _make_tm()
     store = NoteStore(role_id="tester_1", time_manager=tm)
     store.write_note("待办", "删掉", remind_tick=10)
     assert len(tm.list_tasks(owner_role="tester_1")) == 1
@@ -74,7 +77,7 @@ def test_delete_note_cancels_reminder(tmp_path):
 
 def test_edit_note_resets_reminder(tmp_path):
     """edit_note 提供 remind_tick → 旧提醒取消, 注册新提醒."""
-    tm = _make_tm(_FakeClock())
+    tm = _make_tm()
     store = NoteStore(role_id="tester_1", time_manager=tm)
     store.write_note("计划", "v1", remind_tick=5)
     store.edit_note("计划", "v2", remind_tick=30)
@@ -90,8 +93,7 @@ def test_edit_note_resets_reminder(tmp_path):
 
 def test_reminder_fires_task_due_event(tmp_path):
     """提醒到点 → TASK_DUE 事件触发 (可控时钟推进)."""
-    clock = _FakeClock()
-    tm = _make_tm(clock)
+    tm = _make_tm()
     captured: list = []
     tm.set_event_sender(lambda ev: captured.append(ev))
     store = NoteStore(role_id="tester_1", time_manager=tm)
@@ -101,7 +103,7 @@ def test_reminder_fires_task_due_event(tmp_path):
     try:
         # 推进到 Tick 3 之后 (10 分钟/Tick); 等到 TASK_DUE 或超时
         # (SHIFT_START 与 TASK_DUE 同迭代相继投递, 不能以 captured 非空为完成条件)
-        clock.advance(3 * 10 + 1)
+        _jump_tick(tm, 3)  # 快进跳到 Tick 3 (提醒到期)
         deadline = time_module.time() + 3
         while (time_module.time() < deadline
                and not any(ev.event_type == "TASK_DUE" for ev in captured)):
@@ -123,8 +125,7 @@ def test_reminder_fires_task_due_event(tmp_path):
 
 def test_task_registered_once_on_creation(tmp_path):
     """当天任务: 创建时注册一次, 上班加载不重复注册."""
-    clock = _FakeClock()
-    tm = _make_tm(clock)
+    tm = _make_tm()
     tm.start()
     try:
         tm.schedule_task("今天的事", owner_role="r1", target_tick=5)
@@ -140,15 +141,14 @@ def test_task_registered_once_on_creation(tmp_path):
 
 def test_future_task_loaded_on_target_day(tmp_path):
     """隔天任务: 创建时不注册 (仅保存), 目标天上班加载时补注册一次."""
-    clock = _FakeClock()
-    tm = _make_tm(clock)
+    tm = _make_tm()
     tm.start()
     try:
         task = tm.schedule_task("明天的事", owner_role="r1", target_tick=5, day=2)
         assert task.event_id == ""            # 创建时是隔天 → 仅保存
         assert len(tm._tick_schedule) == 0
         # 推进到第 2 天 (1 天 = 144 Tick × 10 分钟), 上班加载
-        clock.advance(144 * 10 + 1)
+        _jump_tick(tm, 144)  # 快进跳到第 2 天 (绝对 tick 144)
         tm._load_today_tasks_to_bus()
         assert task.event_id                   # 现在补注册了
         assert len(tm._tick_schedule) == 1
@@ -162,8 +162,7 @@ def test_future_task_loaded_on_target_day(tmp_path):
 def test_duplicate_register_warns(tmp_path, caplog):
     """兜底: 已注册任务被再次注册 → WARNING (运行异常) 且不重复注册."""
     import logging
-    clock = _FakeClock()
-    tm = _make_tm(clock)
+    tm = _make_tm()
     tm.start()
     try:
         task = tm.schedule_task("只注册一次", owner_role="r1", target_tick=5)

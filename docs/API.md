@@ -142,7 +142,8 @@ TimeEventBus(minutes_per_tick=10, shift_start_tick=0, shift_end_tick=60,
 | `edit_task(task_id, description=None, target_tick=None, day=None)` | — | `Optional[ScheduledTask]` |
 | `cancel_task(task_id)` | — | bool |
 
-**生命周期**: `start()` 启动线程（记录启动时刻=Tick 0）、`stop()` 停止、`is_running` 属性。
+**生命周期**: `start()` 启动线程（Tick 0 / 第 1 天）、`stop()` 停止、`is_running` 属性。
+Tick 为显式状态：不随真实时间流逝，仅在全部角色空闲时快进跳变（`set_fast_forward(enabled, idle_seconds)` 可调）。
 
 **自动事件**: 每天第 0 Tick → `SHIFT_START`（EMERGENCY）；每天 ≥60 Tick → `SHIFT_END`（EMERGENCY，instruction 提示调 summary）；到期任务 → `TASK_DUE`（NORMAL，`target_role=owner`）。
 
@@ -439,7 +440,7 @@ loader.close()
 
 ```python
 DeepSeekLLM(api_key=None, model=None)   # 默认从环境变量 DEEPSEEK_API_KEY / DEEPSEEK_MODEL
-OllamaLLM(model=None)                   # 本地 Ollama, 默认 gemma4:e2b-it-q4_K_M, 免 API Key
+OllamaLLM(model=None)                   # 本地 Ollama, 默认 gemma4:e4b-it-q4_K_M, 免 API Key
 ```
 
 | 方法 | 参数 | 返回 |
@@ -449,7 +450,7 @@ OllamaLLM(model=None)                   # 本地 Ollama, 默认 gemma4:e2b-it-q4
 | `chat_with_tools(messages, tools)` | list, list | `(content, tool_calls, usage)` |
 
 环境变量: `DEEPSEEK_API_KEY`（必填）、`DEEPSEEK_MODEL`（默认 deepseek-v4-flash）、`DEEPSEEK_THINKING`（默认 true，思考模式）;
-`LLM_PROVIDER`（deepseek/ollama，切换后端）、`OLLAMA_BASE_URL`（默认 http://localhost:11434）、`OLLAMA_MODEL`（默认 gemma4:e2b-it-q4_K_M）。
+`LLM_PROVIDER`（deepseek/ollama，切换后端）、`OLLAMA_BASE_URL`（默认 http://localhost:11434）、`OLLAMA_MODEL`（默认 gemma4:e4b-it-q4_K_M）。
 
 ---
 

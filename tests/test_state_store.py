@@ -31,8 +31,8 @@ def test_save_restore_roundtrip(tmp_path, monkeypatch):
         urgency=Urgency.HIGH, description="完成登录页开发", source="github",
         status="done", result="已交付", tokens_consumed=456))
     ceo.add_task(Task(urgency=Urgency.NORMAL, description="待办: 写周报"))
-    # 时钟前移 30 Tick → 第 1 天 Tick 30
-    s1.time_manager._start_dt = datetime.now() - timedelta(minutes=30 * 10)
+    # Tick 前移到 30 → 第 1 天 Tick 30
+    s1.time_manager._tick = 30
     store.save(s1)
 
     s2 = _make(tmp_path, monkeypatch, "CEO")

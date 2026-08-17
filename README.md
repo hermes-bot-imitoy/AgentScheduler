@@ -19,10 +19,10 @@
 ┌──────────────────────────────────────────────────────────┐
 │        TimeEventBus (时间 × 事件 深度绑定)                │
 │   (2026-08 起 TimeManager 已并入 EventBus, 统一此名)      │
-│   - 时钟/Tick/天 (1 Tick = 10 分钟, 上班 0~60 Tick)       │
+│   - 时钟/Tick/天 (1 Tick = 10 分钟换算, 上班 0~60 Tick)    │
 │   - 3 层过滤管线 (状态掩码 → 显著性 → 唤醒)               │
 │   - 事件调度表: register_event(ev, tick) 定时触发          │
-│   - 快进: 全角色空闲 ≥1 分钟 → 跳到下一事件 Tick           │
+│   - Tick 事件驱动: 全角色空闲才快进 (有任务跳任务, 没任务跳下班/次日上班) │
 └──────────────┬───────────────────────────────────────────┘
                │  SHIFT_START/SHIFT_END/TASK_DUE 事件
                ▼
@@ -61,6 +61,7 @@
   - `tick=None` → 立即投递（进 3 层过滤管线）
   - `tick=N` → 存入事件调度表，时间线程到点自动投递
 - 作息事件自动触发：每天 Tick 0 → `SHIFT_START`（上班），Tick 60 → `SHIFT_END`（下班）
+- **Tick 事件驱动（不随真实时间流逝）**：角色忙碌期间 Tick 冻结（LLM 在 1 Tick 内跑完内容，不会因处理耗时错过未来 Tick 的任务）；全部角色空闲持续 60s 才快进——有任务跳任务 Tick，没任务跳当天下班，已下班跳次日上班
 - 笔记与定时任务统一（统称笔记）：`write_note` 填 `remind_tick` = 带提醒的笔记，到点像任务一样发送提醒事件；底层 `schedule_task` 只保存任务列表；当天任务直接注册事件，隔天任务目标天上班时自动加载
 - 兼容别名 `TimeManager` 已于 2026-08 移除（commit `2953835`）——统一使用 `TimeEventBus`
 
@@ -320,7 +321,7 @@ print(dev._tools.call_tool("lan_devices", {}))
 | DEEPSEEK_BASE_URL | https://api.deepseek.com | API 地址 |
 | LLM_PROVIDER | deepseek | LLM 后端: `deepseek` (云端) / `ollama` (本地) |
 | OLLAMA_BASE_URL | http://localhost:11434 | Ollama 服务地址 (OpenAI 兼容端点) |
-| OLLAMA_MODEL | gemma4:e2b-it-q4_K_M | 本地 Ollama 模型标签 |
+| OLLAMA_MODEL | gemma4:e4b-it-q4_K_M | 本地 Ollama 模型标签 |
 
 ### 使用本地 Ollama 模型
 
@@ -330,7 +331,7 @@ print(dev._tools.call_tool("lan_devices", {}))
 
 ```bash
 export LLM_PROVIDER=ollama                     # 全局切换后端
-export OLLAMA_MODEL=gemma4:e2b-it-q4_K_M       # 默认即此, 可省略
+export OLLAMA_MODEL=gemma4:e4b-it-q4_K_M       # 默认即此, 可省略
 ollama serve                                    # 确保本地服务在跑
 python src/role_demo.py                         # 示例: 多角色系统全走本地模型
 ```
