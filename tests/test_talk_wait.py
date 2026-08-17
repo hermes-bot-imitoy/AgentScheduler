@@ -4,7 +4,7 @@
   - wait 往返: A wait B → B 回复 → A 收到回复并恢复原状态
   - 双向互等拆解: A 等 B 时 B 再 wait A → 直接作为回复投递, B 不进入等待
   - 环形等待拒绝: A 等 B, B 等 C, C 等 A → 再发起 wait 被拒绝 (防死锁)
-  - 超时: 对方不回复 → 超时返回错误文本, 状态恢复
+  - 无限等待 + 等待提示: 消息告知对方"提问者正在等待", 无超时限制
   - 非等待对象消息: 他人发给 WAIT 角色 → 正常入队, 不误投递为回复
 
 注: 直接调用 talk 处理器闭包 (与 ToolRegistry.call_tool 走同一逻辑),
@@ -191,33 +191,42 @@ def test_deadlock_cycle_rejected(tmp_path, monkeypatch):
         role_c._end_wait()
 
 
-# ── 4) 超时兜底 ───────────────────────────────────────────
+# ── 4) 无限等待 + 等待提示 ────────────────────────────────
 
-def test_wait_timeout_restores_state(tmp_path, monkeypatch):
-    """对方不回复 → 超时返回错误文本, A 状态恢复."""
-    monkeypatch.setattr(talk_toolkit, "TALK_WAIT_TIMEOUT", 1.0)
+def test_wait_message_carries_waiting_hint(tmp_path, monkeypatch):
+    """wait=true: 消息附带'提问者正在等待'提示; 等待无超时限制 (LLM 时间不可预测)."""
     pool, tks = _setup_roles(tmp_path, monkeypatch, "A", "B")
-    role_a = pool.get_role("A")
+    role_a, role_b = pool.get_role("A"), pool.get_role("B")
 
     result = {}
 
     def sender():
-        result["text"] = _talk(tks, "A", "B", "在吗?", wait=True)
+        result["text"] = _talk(tks, "A", "B", "进度如何?", wait=True)
 
     t = threading.Thread(target=sender)
     t.start()
     try:
-        assert _wait_until(lambda: role_a.state.value == "WAIT"), "A 未进入 WAIT"
-        time.sleep(2.0)   # 超过 1s 超时, B 始终不回复
+        assert _wait_until(lambda: role_b.queue_depth == 1), "B 未收到消息"
+        # B 收到的任务附带"提问者正在等待"提示 (含提问者人名), 让目标知情
+        task = role_b.pop_task()
+        assert task is not None
+        assert "正在等待你的回复" in task.description
+        assert "角色A" in task.description          # 提示里带提问者人名
+        assert task.context.get("waiting") is True
+        # 无 120s 超时: 等 1.5s (旧版 1s 超时会返回错误) 仍在 WAIT
+        time.sleep(1.5)
+        assert role_a.state.value == "WAIT"
+        # B 回复 → A 正常唤醒
+        reply = _talk(tks, "B", "A", "进度 80%")
+        assert "已回复给正在等待的" in reply
         t.join(timeout=5)
     finally:
         t.join(timeout=1)
         pool.shutdown(wait=False)
 
     assert not t.is_alive()
-    assert "超时" in result["text"]
-    assert role_a.state.value == "ON_DUTY_IDLE"   # 状态已恢复
-    assert pool.get_role("B").queue_depth == 1    # 消息确实送达了 B
+    assert "已收到 角色B 的回复: 进度 80%" in result["text"]
+    assert role_a.state.value == "ON_DUTY_IDLE"   # 状态恢复
 
 
 # ── 5) 非等待对象消息不投递 ───────────────────────────────

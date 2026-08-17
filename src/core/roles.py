@@ -524,13 +524,13 @@ class AgentRole:
         self.state = AgentState.WAIT
         self.journal(f"进入 WAIT, 等待 {target_id} 回复")
 
-    def _wait_for_reply(self, timeout: float) -> Optional[str]:
-        """阻塞等待回复 (最多 timeout 秒).
+    def _wait_for_reply(self, timeout: Optional[float] = None) -> Optional[str]:
+        """阻塞等待回复 (默认无限等待; 也可指定最长等待秒数).
 
-        由目标角色的 talk 回复经 _deliver_reply 唤醒; 超时返回 None.
+        由目标角色的 talk 回复经 _deliver_reply 唤醒.
 
         参数:
-            timeout: 最长等待秒数.
+            timeout: 最长等待秒数 (None = 无限等待, 直到收到回复).
 
         返回:
             回复内容, 超时未收到返回 None.

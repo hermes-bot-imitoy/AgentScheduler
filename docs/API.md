@@ -220,7 +220,7 @@ NoteStore(base_dir="./data/notes", role_id="", computer=None, time_manager=None)
 **存储与时间**: `note_store` 属性（惰性 NoteStore）、`get_latest_summary(before_day=None)`、`time_manager` 属性、`bind_time_manager(tm)`。
 **活动日志**: `journal(entry)` — 追加一行到 `data/journals/<role_id>.md`（角色上下文更新自动写入：收到任务/执行/工具调用/笔记/消息）。
 **工具**: `add_mcp_tool(name, description, input_schema, handler)`、`add_toolkit(toolkit) -> int`、`mcp_tool_names`。
-**交流**: `talk_to(target, message, urgency="NORMAL") -> str`（编程式跨角色消息）; LLM 经 talk 工具（target/message/urgency/wait）通信, **target 用成员人名**（花名册不暴露 role_id, 内部自动映射）; `wait=true` 时发送方进入 WAIT 状态同步等待对方回复（回复用 talk 即可, 120s 超时, 互等死锁自动检测拒绝）。
+**交流**: `talk_to(target, message, urgency="NORMAL") -> str`（编程式跨角色消息）; LLM 经 talk 工具（target/message/urgency/wait）通信, **target 用成员人名**（花名册不暴露 role_id, 内部自动映射）; `wait=true` 时发送方进入 WAIT 状态同步等待对方回复（消息附带"提问者正在等待"提示, 等待无时间限制, 互等死锁自动检测拒绝）。
 
 ### `RolePool`
 多角色并发管理，**每角色独立线程 + 独立锁 + 独立 LLM 客户端**（默认 DeepSeekLLM，`llm_provider="ollama"` 时用本地 OllamaLLM）。

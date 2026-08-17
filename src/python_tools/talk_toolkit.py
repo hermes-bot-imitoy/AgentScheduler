@@ -22,10 +22,6 @@ from src.core.types import AgentState
 
 logger = logging.getLogger(__name__)
 
-# wait=true 时最长等待对方回复的秒数; 超时返回错误文本并恢复状态
-# (兜底: 即使等待链异常/对方失联, 角色也不会永久阻塞)
-TALK_WAIT_TIMEOUT = 120.0
-
 
 def build_team_roster(pool: Any) -> str:
     """构建团队花名册 (固定格式, 供 talk 描述与 list_roles 工具复用).
@@ -101,16 +97,16 @@ def create_talk_toolkit(pool: Any) -> ToolKit:
 
         wait=true 流程:
             1. 发送方角色状态 → WAIT (记录原状态)
-            2. 消息入目标角色队列
+            2. 消息入目标角色队列 (消息附带"提问者正在等待"提示, 目标知情)
             3. 发送方 worker 阻塞等待, 目标角色处理消息后调 talk 回复
                (回复投递: 目标 WAIT 且等待对象是发送者 → 直接进回复信箱唤醒)
             4. 收到回复 → 恢复原状态, 返回回复内容给 LLM
-            超时 (TALK_WAIT_TIMEOUT 秒) → 恢复原状态, 返回超时错误文本.
+            等待无时间限制 (LLM 输出时间不可预测, 发送方会一直等到回复).
 
         死锁防护 (多个角色同时 wait=true):
             - 回复投递优先: 目标在等自己 → 一律视为回复, 不进入等待
             - 环形等待检测: 发起 wait 前沿等待链查环, 成环则拒绝
-            - 超时兜底: 任何情况下等待都不会超过 TALK_WAIT_TIMEOUT 秒
+            - 等待提示: 消息明确告知对方自己在等待, 促其尽快回复
 
         返回:
             发送结果字符串 (含对方队列深度或对方回复内容).
@@ -150,14 +146,23 @@ def create_talk_toolkit(pool: Any) -> ToolKit:
                     f"回复了等待中的 {target_role.name}: {message[:80]}")
             return f"已回复给正在等待的 {target_role.name}."
 
+        # 构造任务: wait=true 时在消息中明确告知对方"提问者正在等待",
+        # 让目标知道当前情况 (LLM 输出时间不可预测, 发送方会一直等到回复)
+        waiting_hint = ""
+        if wait and sender is not None:
+            waiting_hint = (
+                f"\n\n⚠️ {sender.name} 正在等待你的回复 (wait=true)。"
+                f"请优先处理这条消息, 尽快用 talk 工具回复对方。"
+            )
         task = Task(
             urgency=urgency,
-            description=f"[FROM talk] {message}",
+            description=f"[FROM talk] {message}{waiting_hint}",
             source="talk",
-            context={"message": message},
+            context={"message": message, "waiting": bool(wait)},
         )
 
-        # ── 2) wait=true: 同步等待对方回复 ──
+        # ── 2) wait=true: 无限等待对方回复 ──
+        #    不做超时限制 (LLM 输出时间不可预测); 等待直到收到回复
         if wait:
             if sender is None:
                 return "错误: 当前角色未绑定, 无法使用 wait=true。"
@@ -174,12 +179,9 @@ def create_talk_toolkit(pool: Any) -> ToolKit:
                 sender.journal(
                     f"发消息给 {target_role.name} ({urgency.name}, 等待回复): "
                     f"{message[:80]}")
-                reply = sender._wait_for_reply(TALK_WAIT_TIMEOUT)
+                reply = sender._wait_for_reply()  # 无限等待回复
             finally:
                 sender._end_wait()
-            if reply is None:
-                return (f"等待 {target_role.name} 回复超时 "
-                        f"({TALK_WAIT_TIMEOUT:.0f}s), 未收到回复。")
             return f"已收到 {target_role.name} 的回复: {reply}"
 
         # ── 3) 普通消息: 入目标队列, 立即返回 ──
@@ -214,8 +216,10 @@ def create_talk_toolkit(pool: Any) -> ToolKit:
             "根据每个人的职责选择合适的人选后, 用 target 发送.\n"
             "target 参数使用成员姓名 (见 list_roles 花名册, 例如 '王建国').\n"
             "wait=true 表示需要对方回复后才能继续 (同步等待): 你会进入 WAIT 状态, "
-            "对方会用 talk 工具回复你, 收到回复后工具返回回复内容并恢复原状态. "
-            "等待上限 120 秒, 超时会返回错误. 仅在确实需要对方答案才能继续时才用 wait=true; "
+            "消息会附带'你正在等待回复'的提示, 对方收到后应尽快用 talk 回复你; "
+            "收到回复后工具返回回复内容并恢复原状态. "
+            "等待没有时间限制 (LLM 输出时间不可预测). "
+            "仅在确实需要对方答案才能继续时才用 wait=true; "
             "普通通知/委托请用 wait=false (默认), 不要互相 wait 以免死锁."
         ),
         input_schema={
