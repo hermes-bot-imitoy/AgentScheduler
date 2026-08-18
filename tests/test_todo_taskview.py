@@ -56,11 +56,9 @@ def test_todo_store_invalid_status(tmp_path):
 # ── todo 工具层 ──────────────────────────────────────────
 
 
-def _bind_todo(role: AgentRole, path=None) -> object:
-    """绑定 TodoStore (默认隔离路径, 避免读到真实运行残留)."""
-    from src.core.todo_store import TodoStore
+def _bind_todo(role: AgentRole) -> object:
     tk = create_todo_toolkit()
-    tk._todo_holder["store"] = TodoStore(role_id=role.role_id, path=path)  # type: ignore[attr-defined]
+    tk._todo_holder["store"] = role.todo_store  # type: ignore[attr-defined]
     return tk
 
 
@@ -70,7 +68,7 @@ def test_todo_tools_via_handler(tmp_path, monkeypatch):
     pool = RolePool()
     role = AgentRole(name="测试", role_id="tester_1")
     pool.add_role(role)
-    tk = _bind_todo(role, str(tmp_path / "todos.json"))
+    tk = _bind_todo(role)
     h = tk._tools["todo_add"].handler
 
     # 缺标题报错

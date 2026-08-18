@@ -25,12 +25,10 @@
 
 from typing import Callable
 
-from src.core.drive_store import DriveStore
 from src.python_tools.memory_toolkit import create_memory_toolkit
 from src.python_tools.time_toolkit import create_time_toolkit
 from src.python_tools.todo_toolkit import create_todo_toolkit
 from src.python_tools.task_view_toolkit import create_task_view_toolkit
-from src.python_tools.drive_toolkit import create_drive_toolkit
 from src.python_tools.mcp_manager import MCPManager, create_mcp_manager_toolkit
 from src.python_tools.computer_toolkit import create_computer_toolkit
 from src.python_tools.skill_toolkit import SkillManager, create_skill_manager_toolkit
@@ -43,9 +41,6 @@ _MCP_MANAGER = MCPManager()
 # 全局共享技能库管理器 (懒扫描: 首次调用 skill_* 工具时扫描 data/skills/).
 _SKILL_MANAGER = SkillManager()
 
-# 全局共享企业云盘 (目录树 data/drive/<角色名>/..., 角色注册时建目录).
-_DRIVE_MANAGER = DriveStore()
-
 # 默认工具类注册表: {名称: 工厂函数}
 # 角色被添加进 AgentSystem 时 (auto_toolkits=True) 自动逐个加载.
 # 注: 定时任务工具已并入笔记 (write_note 的 remind_tick 参数 = 定时提醒),
@@ -55,7 +50,6 @@ DEFAULT_TOOLKITS: dict[str, Callable[[], object]] = {
     "time": create_time_toolkit,
     "todo": create_todo_toolkit,       # Todo 清单 (个人待办, id+状态管理)
     "task_view": create_task_view_toolkit,   # 任务列表 (队列+历史视图)
-    "drive": lambda: create_drive_toolkit(_DRIVE_MANAGER),   # 企业云盘
     "computer": create_computer_toolkit,          # run_command / computer_status / reboot
     "mcp_manager": lambda: create_mcp_manager_toolkit(_MCP_MANAGER),
     "skill_manager": lambda: create_skill_manager_toolkit(_SKILL_MANAGER),

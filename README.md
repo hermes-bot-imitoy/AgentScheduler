@@ -321,7 +321,7 @@ print(dev._tools.call_tool("lan_devices", {}))
 | DEEPSEEK_BASE_URL | https://api.deepseek.com | API 地址 |
 | LLM_PROVIDER | deepseek | LLM 后端: `deepseek` (云端) / `ollama` (本地) |
 | OLLAMA_BASE_URL | http://localhost:11434 | Ollama 服务地址 (OpenAI 兼容端点) |
-| OLLAMA_MODEL | gemma4:cloud | 本地 Ollama 模型标签 |
+| OLLAMA_MODEL | gemma4:e4b-it-q4_K_M | 本地 Ollama 模型标签 |
 
 ### 使用本地 Ollama 模型
 
@@ -331,7 +331,7 @@ print(dev._tools.call_tool("lan_devices", {}))
 
 ```bash
 export LLM_PROVIDER=ollama                     # 全局切换后端
-export OLLAMA_MODEL=gemma4:cloud       # 默认即此, 可省略
+export OLLAMA_MODEL=gemma4:e4b-it-q4_K_M       # 默认即此, 可省略
 ollama serve                                    # 确保本地服务在跑
 python src/role_demo.py                         # 示例: 多角色系统全走本地模型
 ```
