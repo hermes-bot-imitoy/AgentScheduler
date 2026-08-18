@@ -68,7 +68,9 @@ def _toolkit_binders() -> dict[str, Callable[[Any, Any], None]]:
     """
     global _TOOLKIT_BINDERS
     if _TOOLKIT_BINDERS is None:
+        from src.python_tools import _DRIVE_MANAGER
         from src.python_tools.computer_toolkit import bind_computer_to_toolkit
+        from src.python_tools.drive_toolkit import bind_drive_to_toolkit
         from src.python_tools.hr_toolkit import bind_role_to_toolkit as bind_hr
         from src.python_tools.mcp_manager import bind_mcp_manager_to_toolkit
         from src.python_tools.memory_toolkit import bind_store_to_toolkit
@@ -86,6 +88,7 @@ def _toolkit_binders() -> dict[str, Callable[[Any, Any], None]]:
             "computer":      lambda tk, role: bind_computer_to_toolkit(tk, role),
             "todo":          lambda tk, role: bind_todo_to_toolkit(tk, role.todo_store),
             "task_view":     lambda tk, role: bind_task_view(tk, role),
+            "drive":         lambda tk, role: bind_drive_to_toolkit(tk, _DRIVE_MANAGER, role),
         }
     return _TOOLKIT_BINDERS
 
@@ -494,9 +497,10 @@ class AgentRole:
         if "talk" in self.mcp_tool_names:
             return  # already registered
 
+        from src.python_tools import _DRIVE_MANAGER
         from src.python_tools.talk_toolkit import create_talk_toolkit
 
-        tk = create_talk_toolkit(self._pool)
+        tk = create_talk_toolkit(self._pool, _DRIVE_MANAGER)
         tk._role_holder = {"role": self}  # type: ignore[attr-defined]  # 供 talk 记录发送方活动日志
         added = self.add_toolkit(tk)
         logger.info("[%s] talk toolkit loaded — %d tools", self.role_id, added)
@@ -728,6 +732,14 @@ class RolePool:
         # 每个注册进池的角色都立即拥有专属活动日志 (data/journals/<role_id>.md),
         # 不等第一次活动 — 保证"所有角色都有一个专门的 log".
         role.journal(f"角色就位: {role.name} — {role.title or role.role_id}")
+        # 企业云盘: 注册即创建本人目录 (根目录文件夹 = 角色名字)
+        try:
+            from src.python_tools import _DRIVE_MANAGER
+            _DRIVE_MANAGER.ensure_role_dir(role.name)
+        except Exception:
+            import logging as _lg
+            _lg.getLogger(__name__).warning(
+                "云盘目录创建失败 (不影响角色注册)", exc_info=True)
 
     def _setup_role(self, role: AgentRole) -> None:
         """角色装配 (唯一入口): 绑定共享时钟 → 默认工具 → 默认 MCP 组.

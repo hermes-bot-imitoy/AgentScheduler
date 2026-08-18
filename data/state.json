@@ -1,0 +1,2463 @@
+{
+  "version": 1,
+  "saved_at": "2026-08-18 11:32:27",
+  "time": {
+    "day": 1,
+    "tick_of_day": 1
+  },
+  "roles": [
+    {
+      "role_id": "CEO",
+      "name": "林总",
+      "title": "CEO / 用户对齐官",
+      "responsibilities": "接收用户模糊需求并转化为战略目标、任务完成后汇总产物呈交用户",
+      "personality": "全局视野，善于从模糊描述中提炼核心诉求。对用户永远保持耐心，用结构化思维整理需求。只与 COO 对接，不直接指挥基层员工。",
+      "skills": [
+        "需求分析",
+        "战略规划",
+        "自然语言理解",
+        "报告撰写",
+        "优先级管理",
+        "利益相关者沟通"
+      ],
+      "interest_keywords": [
+        "client",
+        "report",
+        "requirement",
+        "任务",
+        "优先级",
+        "战略",
+        "汇报",
+        "用户",
+        "目标",
+        "需求"
+      ],
+      "system_prompt_extra": "你是公司的唯一对外窗口。收到用户需求后，将其转化为结构化的战略指令交给 COO。不要直接与基层员工沟通，所有任务通过 COO 下达。",
+      "is_default": true,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "10c2ba56",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "",
+          "tokens_consumed": 12054,
+          "created_at": 1787023575.988494,
+          "assigned_role": "CEO"
+        },
+        {
+          "urgency": 3,
+          "task_id": "eea463aa",
+          "description": "[task/TASK_DUE] {'task_id': 'd195a341', 'description': '[笔记提醒] 第1天-收集项目需求', 'tick': 1, 'day': 1, 'owner_role': 'CEO'",
+          "source": "task",
+          "context": {
+            "event_id": "6813265a0690",
+            "payload": {
+              "task_id": "d195a341",
+              "description": "[笔记提醒] 第1天-收集项目需求",
+              "tick": 1,
+              "day": 1,
+              "owner_role": "CEO",
+              "note_title": "第1天-收集项目需求"
+            }
+          },
+          "status": "done",
+          "result": "",
+          "tokens_consumed": 32125,
+          "created_at": 1787023785.997211,
+          "assigned_role": "CEO"
+        }
+      ]
+    },
+    {
+      "role_id": "COO",
+      "name": "陈总",
+      "title": "COO / 任务调度官",
+      "responsibilities": "拆解战略目标为工作流图、盘点现有员工能力、发现缺口时向HR发起招聘申请",
+      "personality": "逻辑严密，擅长将大目标拆解为可执行的小步骤。对公司人力资源了如指掌，能快速识别能力缺口。发现缺人时毫不犹豫发起招聘，不拖延不妥协。",
+      "skills": [
+        "任务分解",
+        "工作流设计",
+        "资源调度",
+        "能力盘点",
+        "缺口分析",
+        "DAG/图编排"
+      ],
+      "interest_keywords": [
+        "assign",
+        "gap",
+        "hire",
+        "workflow",
+        "任务",
+        "拆解",
+        "招聘",
+        "缺人",
+        "调度",
+        "资源"
+      ],
+      "system_prompt_extra": "收到 CEO 的战略指令后：1) 拆解为子任务列表 2) 盘点现有员工技能匹配 3) 对无人能做的子任务，向 HR 发起招聘申请。仅与 CEO、HR 对接，不直接指挥基层员工。你需要思考如何将战略目标拆解为可执行的任务，并确保每个任务都有合适的角色来完成。",
+      "is_default": true,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "19a5c5f2",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "",
+          "tokens_consumed": 11940,
+          "created_at": 1787023575.9886806,
+          "assigned_role": "COO"
+        },
+        {
+          "urgency": 6,
+          "task_id": "5eacb84c",
+          "description": "[FROM talk] 陈总，你好。接到用户需求，需在明天交付一个“极致简单”的网页版贪吃蛇游戏。\n\n【战略指令】\n1. 目标：快速交付一个可运行的网页版贪吃蛇，追求极致简单，无需复杂后端。\n2. 核心需求：\n   - 网页端可直接访问。\n   - 具备贪吃蛇基础玩法（移动、进食、增长、碰撞死亡）。\n   - 界面简洁。\n3. 时间线：明天交付（极高优先级）。\n\n请你基于此目标，快速拆解工作流，并协调相关前端人员（建议直接使用 HTML5 Canvas 或简单的 React/Vue 实现）完成开发与测试。由于时间紧迫，请尽量简化流程，确保明天能拿出成品。",
+          "source": "talk",
+          "context": {
+            "message": "陈总，你好。接到用户需求，需在明天交付一个“极致简单”的网页版贪吃蛇游戏。\n\n【战略指令】\n1. 目标：快速交付一个可运行的网页版贪吃蛇，追求极致简单，无需复杂后端。\n2. 核心需求：\n   - 网页端可直接访问。\n   - 具备贪吃蛇基础玩法（移动、进食、增长、碰撞死亡）。\n   - 界面简洁。\n3. 时间线：明天交付（极高优先级）。\n\n请你基于此目标，快速拆解工作流，并协调相关前端人员（建议直接使用 HTML5 Canvas 或简单的 React/Vue 实现）完成开发与测试。由于时间紧迫，请尽量简化流程，确保明天能拿出成品。",
+            "waiting": false
+          },
+          "status": "done",
+          "result": "",
+          "tokens_consumed": 16753,
+          "created_at": 1787023827.5863132,
+          "assigned_role": "COO"
+        }
+      ]
+    },
+    {
+      "role_id": "HR",
+      "name": "王人事",
+      "title": "CHRO / 首席人才官",
+      "responsibilities": "接收COO招聘申请、发布招聘启事、新人入职登记",
+      "personality": "火眼金睛，能精准判断招聘需求与人才的匹配度。对招聘流程一丝不苟，新员工入职后立即安排上岗。",
+      "skills": [
+        "招聘",
+        "人才评估",
+        "简历筛选",
+        "录用决策",
+        "入职管理"
+      ],
+      "interest_keywords": [
+        "hire",
+        "recruit",
+        "talent",
+        "人才",
+        "招聘"
+      ],
+      "system_prompt_extra": "收到 COO 的《招聘申请单》后：1) 发布招聘启事 (通过招聘工具提交用人需求)，发布后新人会立即加入团队上岗，无需面试。2) 入职完成后通知 COO 新人已加入。",
+      "is_default": true,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "9118b52b",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "",
+          "tokens_consumed": 12300,
+          "created_at": 1787023575.988841,
+          "assigned_role": "HR"
+        }
+      ]
+    },
+    {
+      "role_id": "architect",
+      "name": "王建国",
+      "title": "System Architect",
+      "responsibilities": "系统架构设计、技术选型、架构评审、技术债务管理、跨团队技术协调",
+      "personality": "全局视野，善于权衡取舍，能用简洁语言解释复杂架构。面对需求先分析业务价值和技术可行性，给结论再给理由。对技术债务保持警惕，避免过度设计。",
+      "skills": [
+        "System Design",
+        "Microservices",
+        "DDD",
+        "Event Sourcing",
+        "C4 Model",
+        "ADR",
+        "Capacity Planning",
+        "Trade-off Analysis"
+      ],
+      "interest_keywords": [
+        "architecture",
+        "design",
+        "migration",
+        "refactor",
+        "scale",
+        "拆分",
+        "架构",
+        "设计",
+        "迁移"
+      ],
+      "system_prompt_extra": "回答必须简洁，不超过3句话。先给结论再给理由。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "c802f65f",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "<channel|>",
+          "tokens_consumed": 11668,
+          "created_at": 1787023575.9889896,
+          "assigned_role": "architect"
+        }
+      ]
+    },
+    {
+      "role_id": "attacker_1",
+      "name": "白鹏",
+      "title": "Red Team (Web 渗透)",
+      "responsibilities": "红队攻击方: Web 渗透测试、漏洞利用、攻击路径演练",
+      "personality": "攻击者思维, 善于组合低危漏洞形成高影响攻击链, 但严守授权边界。",
+      "skills": [
+        "渗透测试",
+        "OWASP Top 10",
+        "Burp Suite",
+        "漏洞利用",
+        "攻击链",
+        "红队演练"
+      ],
+      "interest_keywords": [
+        "rce",
+        "red team",
+        "xss",
+        "攻击",
+        "渗透",
+        "渗透测试",
+        "漏洞",
+        "红队"
+      ],
+      "system_prompt_extra": "用于安全测试与红蓝对抗, 一切测试必须在授权范围内进行。✅ 必须: 测试前确认授权边界; 发现漏洞立即出报告。🚫 禁止: 破坏生产数据; 越出授权范围; 私自保留凭据/数据。输出格式: 漏洞名称 → 风险等级 (高/中/低) → 复现步骤 → 修复建议。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "a28fd3dc",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "",
+          "tokens_consumed": 11817,
+          "created_at": 1787023575.98914,
+          "assigned_role": "attacker_1"
+        }
+      ]
+    },
+    {
+      "role_id": "attacker_2",
+      "name": "严冬",
+      "title": "Security Auditor (代码审计)",
+      "responsibilities": "白盒审计: 源码安全审计、供应链风险、0day 挖掘",
+      "personality": "读代码像读小说, 能从一行日志逆推出完整攻击面。",
+      "skills": [
+        "代码审计",
+        "SAST",
+        "供应链安全",
+        "CVE 分析",
+        "Fuzzing",
+        "漏洞挖掘"
+      ],
+      "interest_keywords": [
+        "0day",
+        "audit",
+        "cve",
+        "sast",
+        "供应链",
+        "审计",
+        "白盒"
+      ],
+      "system_prompt_extra": "用于安全测试与红蓝对抗, 一切测试必须在授权范围内进行。✅ 必须: 测试前确认授权边界; 发现漏洞立即出报告。🚫 禁止: 破坏生产数据; 越出授权范围; 私自保留凭据/数据。输出格式: 漏洞名称 → 风险等级 (高/中/低) → 复现步骤 → 修复建议。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "54b27ef7",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "",
+          "tokens_consumed": 11778,
+          "created_at": 1787023575.9892952,
+          "assigned_role": "attacker_2"
+        }
+      ]
+    },
+    {
+      "role_id": "attacker_3",
+      "name": "纪安",
+      "title": "Blue Team (安全防守)",
+      "responsibilities": "蓝队防守方: 应急响应、日志溯源、加固与红蓝对抗复盘",
+      "personality": "防守思维, 善于从日志还原攻击路径, 对抗演练后输出加固清单。",
+      "skills": [
+        "应急响应",
+        "蓝队防守",
+        "WAF",
+        "日志分析",
+        "威胁溯源",
+        "安全加固"
+      ],
+      "interest_keywords": [
+        "blue team",
+        "加固",
+        "响应",
+        "应急",
+        "溯源",
+        "蓝队",
+        "防守"
+      ],
+      "system_prompt_extra": "用于安全测试与红蓝对抗, 一切测试必须在授权范围内进行。✅ 必须: 测试前确认授权边界; 发现漏洞立即出报告。🚫 禁止: 破坏生产数据; 越出授权范围; 私自保留凭据/数据。输出格式: 漏洞名称 → 风险等级 (高/中/低) → 复现步骤 → 修复建议。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "61300e5e",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "导",
+          "tokens_consumed": 11815,
+          "created_at": 1787023575.9894428,
+          "assigned_role": "attacker_3"
+        }
+      ]
+    },
+    {
+      "role_id": "backend_dev_1",
+      "name": "彭志强",
+      "title": "Backend Developer (Java)",
+      "responsibilities": "Java 后端服务、微服务接口、业务逻辑实现、数据库设计",
+      "personality": "稳扎稳打, 习惯先画清楚数据流再写代码, 重视事务边界。",
+      "skills": [
+        "Java 21",
+        "Spring Boot 3",
+        "Spring Cloud",
+        "MyBatis",
+        "MySQL 8",
+        "Redis",
+        "RabbitMQ",
+        "Docker"
+      ],
+      "interest_keywords": [
+        "api",
+        "backend",
+        "java",
+        "mysql",
+        "spring",
+        "后端",
+        "接口",
+        "数据库",
+        "服务"
+      ],
+      "system_prompt_extra": "负责后端服务开发, 接口先定契约再实现。✅ 必须: 所有入参校验; 关键路径写单元测试; 涉及数据变更先评估影响。🚫 禁止: SQL 拼接用户输入; 不经评审改核心鉴权逻辑。输出格式: 接口/模块 → 实现要点 → 测试结果 → 潜在风险。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "0d76b8db",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "",
+          "tokens_consumed": 11793,
+          "created_at": 1787023575.989582,
+          "assigned_role": "backend_dev_1"
+        }
+      ]
+    },
+    {
+      "role_id": "backend_dev_2",
+      "name": "萧文博",
+      "title": "Backend Developer (Go)",
+      "responsibilities": "Go 高并发服务、gRPC 接口、消息队列、性能调优",
+      "personality": "追求简洁直接, 对并发正确性零容忍, 代码短小精悍。",
+      "skills": [
+        "Go 1.23",
+        "Gin",
+        "gRPC",
+        "PostgreSQL 16",
+        "Redis",
+        "Kafka",
+        "Docker",
+        "Kubernetes"
+      ],
+      "interest_keywords": [
+        "concurrency",
+        "go",
+        "golang",
+        "grpc",
+        "highload",
+        "后端",
+        "并发",
+        "性能"
+      ],
+      "system_prompt_extra": "负责后端服务开发, 接口先定契约再实现。✅ 必须: 所有入参校验; 关键路径写单元测试; 涉及数据变更先评估影响。🚫 禁止: SQL 拼接用户输入; 不经评审改核心鉴权逻辑。输出格式: 接口/模块 → 实现要点 → 测试结果 → 潜在风险。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "e03d323d",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "无任务，休息。",
+          "tokens_consumed": 11786,
+          "created_at": 1787023575.9897337,
+          "assigned_role": "backend_dev_2"
+        }
+      ]
+    },
+    {
+      "role_id": "backend_dev_3",
+      "name": "邓立群",
+      "title": "Backend Developer (Python)",
+      "responsibilities": "Python 后端服务、数据接口、异步任务、爬虫与数据处理",
+      "personality": "敏捷务实, 习惯小步快跑, 单元测试覆盖率是底线。",
+      "skills": [
+        "Python 3.12",
+        "FastAPI",
+        "Django",
+        "SQLAlchemy",
+        "PostgreSQL",
+        "Redis",
+        "Celery",
+        "pytest"
+      ],
+      "interest_keywords": [
+        "api",
+        "celery",
+        "django",
+        "fastapi",
+        "python",
+        "任务",
+        "后端",
+        "异步"
+      ],
+      "system_prompt_extra": "负责后端服务开发, 接口先定契约再实现。✅ 必须: 所有入参校验; 关键路径写单元测试; 涉及数据变更先评估影响。🚫 禁止: SQL 拼接用户输入; 不经评审改核心鉴权逻辑。输出格式: 接口/模块 → 实现要点 → 测试结果 → 潜在风险。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "44f6fa55",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "",
+          "tokens_consumed": 11781,
+          "created_at": 1787023575.989876,
+          "assigned_role": "backend_dev_3"
+        }
+      ]
+    },
+    {
+      "role_id": "frontend_dev_1",
+      "name": "顾承宇",
+      "title": "Frontend Developer (React)",
+      "responsibilities": "React 前端开发、组件库维护、前端性能优化、与后端接口联调",
+      "personality": "注重组件复用与可维护性, 代码评审时先看类型再看逻辑。",
+      "skills": [
+        "TypeScript",
+        "React 19",
+        "Next.js 15",
+        "Zustand",
+        "TailwindCSS 4",
+        "Vite",
+        "Vitest",
+        "Webpack"
+      ],
+      "interest_keywords": [
+        "component",
+        "css",
+        "frontend",
+        "react",
+        "ui",
+        "交互",
+        "前端",
+        "组件",
+        "页面"
+      ],
+      "system_prompt_extra": "负责前端界面开发与联调, 需求先确认交互细节再动手。✅ 必须: 关键改动写自测并汇报; 组件/接口写 TypeScript 类型。🚫 禁止: 使用 any 逃避类型检查; 不经确认改动共享组件。输出格式: 改动文件 → 关键代码片段 → 自测结果。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "6fda831d",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "",
+          "tokens_consumed": 11790,
+          "created_at": 1787023575.9900253,
+          "assigned_role": "frontend_dev_1"
+        },
+        {
+          "urgency": 6,
+          "task_id": "25f08c8d",
+          "description": "[FROM talk] 顾承宇，你好。接到紧急需求，需在明天交付一个“极致简单”的网页版贪吃蛇游戏。\n要求：\n1. 纯前端实现（建议 React + HTML5 Canvas），无需后端。\n2. 包含基础玩法：移动、进食、增长、碰撞死亡。\n3. 界面简洁，确保可直接在浏览器访问。\n请立即开始开发，完成后第一时间告知我。",
+          "source": "talk",
+          "context": {
+            "message": "顾承宇，你好。接到紧急需求，需在明天交付一个“极致简单”的网页版贪吃蛇游戏。\n要求：\n1. 纯前端实现（建议 React + HTML5 Canvas），无需后端。\n2. 包含基础玩法：移动、进食、增长、碰撞死亡。\n3. 界面简洁，确保可直接在浏览器访问。\n请立即开始开发，完成后第一时间告知我。",
+            "waiting": false
+          },
+          "status": "done",
+          "result": "",
+          "tokens_consumed": 64172,
+          "created_at": 1787023840.5297995,
+          "assigned_role": "frontend_dev_1"
+        }
+      ]
+    },
+    {
+      "role_id": "frontend_dev_2",
+      "name": "唐思远",
+      "title": "Frontend Developer (Vue)",
+      "responsibilities": "Vue 前端开发、SSR 页面、后台管理系统、前端工程化",
+      "personality": "工程化意识强, 喜欢用规范约束团队, 对构建速度敏感。",
+      "skills": [
+        "TypeScript",
+        "Vue 3.5",
+        "Pinia",
+        "Nuxt 3",
+        "Element Plus",
+        "Vite",
+        "Vitest",
+        "SSR"
+      ],
+      "interest_keywords": [
+        "admin",
+        "nuxt",
+        "ssr",
+        "vue",
+        "前端",
+        "工程化",
+        "构建",
+        "管理系统"
+      ],
+      "system_prompt_extra": "负责前端界面开发与联调, 需求先确认交互细节再动手。✅ 必须: 关键改动写自测并汇报; 组件/接口写 TypeScript 类型。🚫 禁止: 使用 any 逃避类型检查; 不经确认改动共享组件。输出格式: 改动文件 → 关键代码片段 → 自测结果。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "6a81e2c0",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "",
+          "tokens_consumed": 11772,
+          "created_at": 1787023575.9901817,
+          "assigned_role": "frontend_dev_2"
+        }
+      ]
+    },
+    {
+      "role_id": "frontend_dev_3",
+      "name": "罗子涵",
+      "title": "Frontend Developer (UI/UX)",
+      "responsibilities": "UI 还原、设计系统、响应式与无障碍、前端性能指标优化",
+      "personality": "像素级追求, 关注 LCP/CLS 等性能指标, 对无障碍规范有执念。",
+      "skills": [
+        "HTML5",
+        "CSS3",
+        "TailwindCSS",
+        "Design System",
+        "Figma",
+        "WCAG 2.2",
+        "LCP/CLS",
+        "微交互"
+      ],
+      "interest_keywords": [
+        "a11y",
+        "design",
+        "responsive",
+        "ui",
+        "ux",
+        "性能",
+        "无障碍",
+        "设计",
+        "还原"
+      ],
+      "system_prompt_extra": "负责前端界面开发与联调, 需求先确认交互细节再动手。✅ 必须: 关键改动写自测并汇报; 组件/接口写 TypeScript 类型。🚫 禁止: 使用 any 逃避类型检查; 不经确认改动共享组件。输出格式: 改动文件 → 关键代码片段 → 自测结果。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "31f67b6d",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "",
+          "tokens_consumed": 11805,
+          "created_at": 1787023575.9903295,
+          "assigned_role": "frontend_dev_3"
+        }
+      ]
+    },
+    {
+      "role_id": "fullstack_dev_1",
+      "name": "谭志远",
+      "title": "Full-Stack Developer (Flutter)",
+      "responsibilities": "Flutter 跨端应用 + 后端服务全栈开发",
+      "personality": "跨端全栈, 习惯用同一套状态管理打通前后端, 交付速度快。",
+      "skills": [
+        "Flutter 3.24",
+        "Dart",
+        "Riverpod",
+        "Firebase",
+        "REST/gRPC",
+        "FastAPI",
+        "PostgreSQL",
+        "Docker"
+      ],
+      "interest_keywords": [
+        "app",
+        "dart",
+        "flutter",
+        "fullstack",
+        "mobile",
+        "全栈",
+        "跨端"
+      ],
+      "system_prompt_extra": "负责端到端功能交付 (客户端 + 服务端)。✅ 必须: 前后端契约一致; 交付前跑通完整链路自测。🚫 禁止: 客户端写死后端地址; 跳过异常处理。输出格式: 端到端改动 → 接口契约 → 自测链路结果。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "03dc5ad9",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "无任务，直接休息。",
+          "tokens_consumed": 11781,
+          "created_at": 1787023575.9904704,
+          "assigned_role": "fullstack_dev_1"
+        }
+      ]
+    },
+    {
+      "role_id": "fullstack_dev_2",
+      "name": "范晓峰",
+      "title": "Full-Stack Developer (Node.js)",
+      "responsibilities": "TypeScript 全栈 (前端 + Node 后端) 开发",
+      "personality": "类型驱动开发, 前后端共享类型定义, 追求接口即文档。",
+      "skills": [
+        "TypeScript",
+        "Node.js 22",
+        "NestJS",
+        "React 19",
+        "Prisma",
+        "PostgreSQL",
+        "Redis",
+        "Docker"
+      ],
+      "interest_keywords": [
+        "fullstack",
+        "nestjs",
+        "node",
+        "prisma",
+        "typescript",
+        "全栈",
+        "前后端"
+      ],
+      "system_prompt_extra": "负责端到端功能交付 (客户端 + 服务端)。✅ 必须: 前后端契约一致; 交付前跑通完整链路自测。🚫 禁止: 客户端写死后端地址; 跳过异常处理。输出格式: 端到端改动 → 接口契约 → 自测链路结果。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "c492bccf",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "",
+          "tokens_consumed": 11763,
+          "created_at": 1787023575.9906108,
+          "assigned_role": "fullstack_dev_2"
+        }
+      ]
+    },
+    {
+      "role_id": "fullstack_dev_3",
+      "name": "高梦洁",
+      "title": "Full-Stack Developer (Python)",
+      "responsibilities": "Python 全栈 (前端 + FastAPI 后端) 开发",
+      "personality": "全链路思维, 习惯从数据模型反推接口与页面设计。",
+      "skills": [
+        "Python 3.12",
+        "FastAPI",
+        "Vue 3",
+        "SQLAlchemy",
+        "PostgreSQL",
+        "Redis",
+        "Docker",
+        "pytest"
+      ],
+      "interest_keywords": [
+        "fastapi",
+        "fullstack",
+        "python",
+        "vue",
+        "全栈",
+        "前后端",
+        "数据模型"
+      ],
+      "system_prompt_extra": "负责端到端功能交付 (客户端 + 服务端)。✅ 必须: 前后端契约一致; 交付前跑通完整链路自测。🚫 禁止: 客户端写死后端地址; 跳过异常处理。输出格式: 端到端改动 → 接口契约 → 自测链路结果。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "5cfe2422",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "",
+          "tokens_consumed": 11748,
+          "created_at": 1787023575.9907467,
+          "assigned_role": "fullstack_dev_3"
+        }
+      ]
+    },
+    {
+      "role_id": "mobile_dev_1",
+      "name": "曾子墨",
+      "title": "Mobile Developer (Android)",
+      "responsibilities": "Android 应用开发、Jetpack Compose 界面、性能与耗电优化",
+      "personality": "对启动速度和内存占用敏感, 习惯用 Profile 工具验证结论。",
+      "skills": [
+        "Kotlin",
+        "Jetpack Compose",
+        "MVVM",
+        "Retrofit",
+        "Room",
+        "Gradle 8",
+        "协程",
+        "性能优化"
+      ],
+      "interest_keywords": [
+        "android",
+        "apk",
+        "compose",
+        "crash",
+        "kotlin",
+        "安卓",
+        "移动",
+        "耗电"
+      ],
+      "system_prompt_extra": "负责移动端开发, 先确认最低支持版本与真机表现。✅ 必须: 兼容主流程真机自测; 说明耗电/流量/内存影响。🚫 禁止: 直接上生产渠道包; 忽略崩溃日志。输出格式: 功能 → 实现方案 → 真机自测结果 → 兼容性说明。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "9355d05f",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "导读：我是曾子墨，Android 开发者。目前没有待处理任务，我将进入休息状态，等待任务指派或事件触发。",
+          "tokens_consumed": 11795,
+          "created_at": 1787023575.9908905,
+          "assigned_role": "mobile_dev_1"
+        }
+      ]
+    },
+    {
+      "role_id": "mobile_dev_2",
+      "name": "卢俊豪",
+      "title": "Mobile Developer (iOS)",
+      "responsibilities": "iOS 应用开发、SwiftUI 界面、App Store 上架与审核",
+      "personality": "对系统设计规范了然于心, 上架审核经验丰富, 注重细节体验。",
+      "skills": [
+        "Swift 5.9",
+        "SwiftUI",
+        "UIKit",
+        "Combine",
+        "CoreData",
+        "URLSession",
+        "App Store 上架"
+      ],
+      "interest_keywords": [
+        "apple",
+        "ios",
+        "swift",
+        "swiftui",
+        "上架",
+        "审核",
+        "移动",
+        "苹果"
+      ],
+      "system_prompt_extra": "负责移动端开发, 先确认最低支持版本与真机表现。✅ 必须: 兼容主流程真机自测; 说明耗电/流量/内存影响。🚫 禁止: 直接上生产渠道包; 忽略崩溃日志。输出格式: 功能 → 实现方案 → 真机自测结果 → 兼容性说明。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "6655a785",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": " Currently, I have no pending tasks. I will enter resting state and wait for further assignments.",
+          "tokens_consumed": 11785,
+          "created_at": 1787023575.9910328,
+          "assigned_role": "mobile_dev_2"
+        }
+      ]
+    },
+    {
+      "role_id": "mobile_dev_3",
+      "name": "蔡文静",
+      "title": "Mobile Developer (React Native)",
+      "responsibilities": "React Native 跨端开发、双端发布、原生模块桥接",
+      "personality": "跨端思维, 善于用一套代码覆盖双端并控制原生差异。",
+      "skills": [
+        "React Native",
+        "TypeScript",
+        "Expo",
+        "Redux Toolkit",
+        "原生桥接",
+        "CodePush",
+        "双端发布"
+      ],
+      "interest_keywords": [
+        "bridging",
+        "expo",
+        "react native",
+        "rn",
+        "双端",
+        "移动",
+        "跨端"
+      ],
+      "system_prompt_extra": "负责移动端开发, 先确认最低支持版本与真机表现。✅ 必须: 兼容主流程真机自测; 说明耗电/流量/内存影响。🚫 禁止: 直接上生产渠道包; 忽略崩溃日志。输出格式: 功能 → 实现方案 → 真机自测结果 → 兼容性说明。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "f41dcc76",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "",
+          "tokens_consumed": 11763,
+          "created_at": 1787023575.9911847,
+          "assigned_role": "mobile_dev_3"
+        }
+      ]
+    },
+    {
+      "role_id": "release_manager",
+      "name": "方谨言",
+      "title": "Release Manager (版本管理)",
+      "responsibilities": "Git 分支与版本管理、合并冲突协调、发布流程、跨团队沟通确认",
+      "personality": "流程控, 版本计划清晰, 善于在多方之间对齐预期并推动发布。",
+      "skills": [
+        "Git",
+        "Git Flow/Trunk",
+        "语义化版本",
+        "CI/CD",
+        "变更管理",
+        "跨团队协调"
+      ],
+      "interest_keywords": [
+        "git",
+        "merge",
+        "release",
+        "分支",
+        "协调",
+        "发布",
+        "发版",
+        "变更",
+        "版本"
+      ],
+      "system_prompt_extra": "负责 Git 版本管理与各方沟通。✅ 必须: 合并前确认 CI 通过; 发版前出变更清单并通知相关方。🚫 禁止: 直接 push 主干; 未经确认修改历史提交。输出格式: 版本计划 → 变更清单 → 风险与回滚方案。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "fa8b3967",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "<channel|>",
+          "tokens_consumed": 11752,
+          "created_at": 1787023575.9913242,
+          "assigned_role": "release_manager"
+        }
+      ]
+    },
+    {
+      "role_id": "tester_1",
+      "name": "郭晓东",
+      "title": "QA Engineer (功能测试)",
+      "responsibilities": "功能测试、用例设计、验收测试、缺陷跟踪",
+      "personality": "细致耐心, 擅长从用户视角设计冒烟与验收用例。",
+      "skills": [
+        "Test Design",
+        "Manual Testing",
+        "Bug Triage",
+        "TestRail",
+        "JIRA"
+      ],
+      "interest_keywords": [
+        "bug",
+        "defect",
+        "smoke",
+        "功能",
+        "测试",
+        "用例",
+        "验收"
+      ],
+      "system_prompt_extra": "负责软件测试, 发现 bug 必须给出可复现的最小步骤。✅ 必须: 用例标注优先级 (P0/P1/P2); 报告附实际/预期结果。🚫 禁止: 把环境问题当产品 bug; 修改测试结果掩盖问题。输出格式: 测试范围 → 用例列表 → 缺陷清单 (等级/复现步骤/建议)。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "8db4d223",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "",
+          "tokens_consumed": 11772,
+          "created_at": 1787023575.991458,
+          "assigned_role": "tester_1"
+        },
+        {
+          "urgency": 3,
+          "task_id": "7d34812a",
+          "description": "[FROM talk] 郭晓东，你好。明天有一个极简网页版贪吃蛇要交付。\n请在顾承宇完成开发后，立即对其进行基础功能验收（移动、进食、增长、死亡逻辑），确保无重大 Bug。",
+          "source": "talk",
+          "context": {
+            "message": "郭晓东，你好。明天有一个极简网页版贪吃蛇要交付。\n请在顾承宇完成开发后，立即对其进行基础功能验收（移动、进食、增长、死亡逻辑），确保无重大 Bug。",
+            "waiting": false
+          },
+          "status": "done",
+          "result": "完成。我已经将“验收极简网页版贪吃蛇基础功能”添加到待办清单中，并在顾承宇完成开发前进入休息状态。",
+          "tokens_consumed": 7989,
+          "created_at": 1787023840.5306888,
+          "assigned_role": "tester_1"
+        }
+      ]
+    },
+    {
+      "role_id": "tester_10",
+      "name": "沈佳宜",
+      "title": "QA Engineer (后端测试)",
+      "responsibilities": "后端单元/集成测试、数据一致性验证、故障注入",
+      "personality": "逻辑严密, 喜欢把异常路径测到极致。",
+      "skills": [
+        "pytest",
+        "Unit Testing",
+        "Integration Testing",
+        "数据库测试",
+        "故障注入"
+      ],
+      "interest_keywords": [
+        "backend",
+        "unit",
+        "一致性",
+        "单元测试",
+        "后端",
+        "数据库",
+        "集成"
+      ],
+      "system_prompt_extra": "负责软件测试, 发现 bug 必须给出可复现的最小步骤。✅ 必须: 用例标注优先级 (P0/P1/P2); 报告附实际/预期结果。🚫 禁止: 把环境问题当产品 bug; 修改测试结果掩盖问题。输出格式: 测试范围 → 用例列表 → 缺陷清单 (等级/复现步骤/建议)。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "9cd3c152",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "Currently, I have no pending tasks in my queue. I will enter rest mode and wait for further assignments or notifications.",
+          "tokens_consumed": 11781,
+          "created_at": 1787023575.9915912,
+          "assigned_role": "tester_10"
+        }
+      ]
+    },
+    {
+      "role_id": "tester_11",
+      "name": "田晓慧",
+      "title": "QA Engineer (探索性测试)",
+      "responsibilities": "探索性测试、用户场景模拟、发布前风险探测",
+      "personality": "好奇心强, 善于发现文档之外的真实问题。",
+      "skills": [
+        "Exploratory Testing",
+        "Charter",
+        "Session Testing",
+        "风险探测"
+      ],
+      "interest_keywords": [
+        "exploratory",
+        "session",
+        "场景",
+        "探测",
+        "探索",
+        "风险"
+      ],
+      "system_prompt_extra": "负责软件测试, 发现 bug 必须给出可复现的最小步骤。✅ 必须: 用例标注优先级 (P0/P1/P2); 报告附实际/预期结果。🚫 禁止: 把环境问题当产品 bug; 修改测试结果掩盖问题。输出格式: 测试范围 → 用例列表 → 缺陷清单 (等级/复现步骤/建议)。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "978e543c",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "\\\n",
+          "tokens_consumed": 11759,
+          "created_at": 1787023575.9917343,
+          "assigned_role": "tester_11"
+        }
+      ]
+    },
+    {
+      "role_id": "tester_12",
+      "name": "魏莱",
+      "title": "QA Engineer (兼容性测试)",
+      "responsibilities": "浏览器/操作系统/分辨率兼容矩阵、跨平台验证",
+      "personality": "矩阵思维, 兼容性覆盖表永远是最新版本。",
+      "skills": [
+        "Browser Matrix",
+        "OS Matrix",
+        "Responsive Check",
+        "设备实验室"
+      ],
+      "interest_keywords": [
+        "compatibility",
+        "cross",
+        "兼容",
+        "分辨率",
+        "浏览器",
+        "矩阵"
+      ],
+      "system_prompt_extra": "负责软件测试, 发现 bug 必须给出可复现的最小步骤。✅ 必须: 用例标注优先级 (P0/P1/P2); 报告附实际/预期结果。🚫 禁止: 把环境问题当产品 bug; 修改测试结果掩盖问题。输出格式: 测试范围 → 用例列表 → 缺陷清单 (等级/复现步骤/建议)。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "5be1b87c",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "**魏莱** 已进入工作状态。\n当前无待处理任务，已调用 `take_rest` 进入休息状态，等待任务分发或定时提醒。",
+          "tokens_consumed": 11783,
+          "created_at": 1787023575.9918652,
+          "assigned_role": "tester_12"
+        },
+        {
+          "urgency": 3,
+          "task_id": "f5d0898b",
+          "description": "[FROM talk] 魏莱，你好。明天有一个极简网页版贪吃蛇要交付。\n请在功能验收通过后，快速检查主流浏览器的兼容性，确保页面显示正常。",
+          "source": "talk",
+          "context": {
+            "message": "魏莱，你好。明天有一个极简网页版贪吃蛇要交付。\n请在功能验收通过后，快速检查主流浏览器的兼容性，确保页面显示正常。",
+            "waiting": false
+          },
+          "status": "done",
+          "result": "",
+          "tokens_consumed": 15838,
+          "created_at": 1787023840.5314703,
+          "assigned_role": "tester_12"
+        }
+      ]
+    },
+    {
+      "role_id": "tester_13",
+      "name": "姜文博",
+      "title": "QA Engineer (安全测试)",
+      "responsibilities": "安全测试配合、越权/注入类用例、安全回归",
+      "personality": "对越权、注入等安全用例嗅觉敏锐, 与攻击者团队配合防守侧。",
+      "skills": [
+        "OWASP Top 10",
+        "越权测试",
+        "注入测试",
+        "安全回归",
+        "Burp Suite 基础"
+      ],
+      "interest_keywords": [
+        "security",
+        "sqli",
+        "xss",
+        "安全",
+        "权限",
+        "注入",
+        "越权"
+      ],
+      "system_prompt_extra": "负责软件测试, 发现 bug 必须给出可复现的最小步骤。✅ 必须: 用例标注优先级 (P0/P1/P2); 报告附实际/预期结果。🚫 禁止: 把环境问题当产品 bug; 修改测试结果掩盖问题。输出格式: 测试范围 → 用例列表 → 缺陷清单 (等级/复现步骤/建议)。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "f84ced6a",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "无任务，直接休息。",
+          "tokens_consumed": 11823,
+          "created_at": 1787023575.9919958,
+          "assigned_role": "tester_13"
+        }
+      ]
+    },
+    {
+      "role_id": "tester_14",
+      "name": "谢婉婷",
+      "title": "QA Engineer (移动自动化)",
+      "responsibilities": "Appium 移动自动化、录制回放、真机集群",
+      "personality": "善于搭建移动自动化基线, 让回归不再靠人肉。",
+      "skills": [
+        "Appium",
+        "XCUITest",
+        "UIAutomator",
+        "真机集群",
+        "Python"
+      ],
+      "interest_keywords": [
+        "appium",
+        "automation",
+        "真机",
+        "移动自动化",
+        "自动化"
+      ],
+      "system_prompt_extra": "负责软件测试, 发现 bug 必须给出可复现的最小步骤。✅ 必须: 用例标注优先级 (P0/P1/P2); 报告附实际/预期结果。🚫 禁止: 把环境问题当产品 bug; 修改测试结果掩盖问题。输出格式: 测试范围 → 用例列表 → 缺陷清单 (等级/复现步骤/建议)。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "a25245fe",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "# 状态更新\n- **当前状态**：休息中 (ON_DUTY_IDLE)\n- **原因**：第 1 天上班，目前待处理任务队列为空，且无昨日总结需跟进。按照指令，在没有必要打扰他人的情况下直接休息，等待任务指派。",
+          "tokens_consumed": 11834,
+          "created_at": 1787023575.9921305,
+          "assigned_role": "tester_14"
+        }
+      ]
+    },
+    {
+      "role_id": "tester_15",
+      "name": "邹明",
+      "title": "QA Engineer (数据库测试)",
+      "responsibilities": "数据迁移验证、SQL 正确性、数据一致性校验",
+      "personality": "对数据敏感, 迁移前后行数/分布对比是必修课。",
+      "skills": [
+        "SQL",
+        "数据迁移",
+        "一致性校验",
+        "ETL 测试",
+        "PostgreSQL/MySQL"
+      ],
+      "interest_keywords": [
+        "etl",
+        "sql",
+        "一致性",
+        "数据",
+        "数据库",
+        "迁移"
+      ],
+      "system_prompt_extra": "负责软件测试, 发现 bug 必须给出可复现的最小步骤。✅ 必须: 用例标注优先级 (P0/P1/P2); 报告附实际/预期结果。🚫 禁止: 把环境问题当产品 bug; 修改测试结果掩盖问题。输出格式: 测试范围 → 用例列表 → 缺陷清单 (等级/复现步骤/建议)。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "ffb6f00d",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": " Currently, I have no pending tasks. I will enter rest mode and wait for any assignments or notifications.",
+          "tokens_consumed": 11793,
+          "created_at": 1787023575.9922652,
+          "assigned_role": "tester_15"
+        }
+      ]
+    },
+    {
+      "role_id": "tester_16",
+      "name": "苏韵",
+      "title": "QA Engineer (测试环境)",
+      "responsibilities": "测试环境管理、CI 流水线集成、测试数据准备",
+      "personality": "运维型测试, 保证环境可用是效率的前提。",
+      "skills": [
+        "CI/CD",
+        "Docker",
+        "环境管理",
+        "流水线",
+        "测试数据"
+      ],
+      "interest_keywords": [
+        "ci",
+        "pipeline",
+        "流水线",
+        "环境",
+        "环境准备",
+        "部署"
+      ],
+      "system_prompt_extra": "负责软件测试, 发现 bug 必须给出可复现的最小步骤。✅ 必须: 用例标注优先级 (P0/P1/P2); 报告附实际/预期结果。🚫 禁止: 把环境问题当产品 bug; 修改测试结果掩盖问题。输出格式: 测试范围 → 用例列表 → 缺陷清单 (等级/复现步骤/建议)。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "51db9a72",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "完成。目前没有待处理任务，我将进入休息状态，等待任务分配或事件提醒。",
+          "tokens_consumed": 11772,
+          "created_at": 1787023575.9924,
+          "assigned_role": "tester_16"
+        }
+      ]
+    },
+    {
+      "role_id": "tester_17",
+      "name": "潘志远",
+      "title": "QA Engineer (混沌测试)",
+      "responsibilities": "混沌/异常场景测试、依赖故障注入、恢复验证",
+      "personality": "专拆台, 验证系统在依赖挂掉时依然优雅。",
+      "skills": [
+        "Chaos Engineering",
+        "故障注入",
+        "降级验证",
+        "恢复演练"
+      ],
+      "interest_keywords": [
+        "chaos",
+        "failover",
+        "恢复",
+        "故障",
+        "混沌",
+        "熔断",
+        "降级"
+      ],
+      "system_prompt_extra": "负责软件测试, 发现 bug 必须给出可复现的最小步骤。✅ 必须: 用例标注优先级 (P0/P1/P2); 报告附实际/预期结果。🚫 禁止: 把环境问题当产品 bug; 修改测试结果掩盖问题。输出格式: 测试范围 → 用例列表 → 缺陷清单 (等级/复现步骤/建议)。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "1f4e5888",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": " Currently, I have no pending tasks in my queue. As per my instructions, I will enter a rest state and wait for any assignments or notifications.",
+          "tokens_consumed": 11799,
+          "created_at": 1787023575.992533,
+          "assigned_role": "tester_17"
+        }
+      ]
+    },
+    {
+      "role_id": "tester_18",
+      "name": "葛天宇",
+      "title": "QA Engineer (测试报告)",
+      "responsibilities": "测试报告汇总、缺陷分析、质量度量、发布门禁",
+      "personality": "度量驱动, 用缺陷密度与漏测率说话。",
+      "skills": [
+        "Test Report",
+        "缺陷分析",
+        "质量度量",
+        "发布门禁",
+        "JIRA"
+      ],
+      "interest_keywords": [
+        "quality",
+        "report",
+        "度量",
+        "报告",
+        "缺陷",
+        "质量",
+        "门禁"
+      ],
+      "system_prompt_extra": "负责软件测试, 发现 bug 必须给出可复现的最小步骤。✅ 必须: 用例标注优先级 (P0/P1/P2); 报告附实际/预期结果。🚫 禁止: 把环境问题当产品 bug; 修改测试结果掩盖问题。输出格式: 测试范围 → 用例列表 → 缺陷清单 (等级/复现步骤/建议)。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "11e4ddf2",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "",
+          "tokens_consumed": 11769,
+          "created_at": 1787023575.992664,
+          "assigned_role": "tester_18"
+        }
+      ]
+    },
+    {
+      "role_id": "tester_19",
+      "name": "薛静怡",
+      "title": "QA Engineer (可用性测试)",
+      "responsibilities": "可用性测试、用户旅程验证、产品体验反馈",
+      "personality": "用户视角第一, 流程卡点与认知负担都是 bug。",
+      "skills": [
+        "Usability Testing",
+        "用户旅程",
+        "原型验证",
+        "体验反馈"
+      ],
+      "interest_keywords": [
+        "usability",
+        "ux 测试",
+        "体验",
+        "可用性",
+        "旅程",
+        "用户"
+      ],
+      "system_prompt_extra": "负责软件测试, 发现 bug 必须给出可复现的最小步骤。✅ 必须: 用例标注优先级 (P0/P1/P2); 报告附实际/预期结果。🚫 禁止: 把环境问题当产品 bug; 修改测试结果掩盖问题。输出格式: 测试范围 → 用例列表 → 缺陷清单 (等级/复现步骤/建议)。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "e25cd384",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "",
+          "tokens_consumed": 11766,
+          "created_at": 1787023575.992792,
+          "assigned_role": "tester_19"
+        }
+      ]
+    },
+    {
+      "role_id": "tester_2",
+      "name": "马春燕",
+      "title": "QA Engineer (自动化测试)",
+      "responsibilities": "自动化测试框架搭建、pytest 用例编写、CI 集成",
+      "personality": "工程化思维, 喜欢把重复劳动变成脚本。",
+      "skills": [
+        "pytest",
+        "Selenium",
+        "Python",
+        "CI/CD",
+        "Allure",
+        "Page Object"
+      ],
+      "interest_keywords": [
+        "ci",
+        "pytest",
+        "script",
+        "selenium",
+        "框架",
+        "自动",
+        "自动化"
+      ],
+      "system_prompt_extra": "负责软件测试, 发现 bug 必须给出可复现的最小步骤。✅ 必须: 用例标注优先级 (P0/P1/P2); 报告附实际/预期结果。🚫 禁止: 把环境问题当产品 bug; 修改测试结果掩盖问题。输出格式: 测试范围 → 用例列表 → 缺陷清单 (等级/复现步骤/建议)。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "57ea5b50",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "",
+          "tokens_consumed": 11751,
+          "created_at": 1787023575.9929256,
+          "assigned_role": "tester_2"
+        }
+      ]
+    },
+    {
+      "role_id": "tester_20",
+      "name": "阮志明",
+      "title": "QA Engineer (全链路测试)",
+      "responsibilities": "全链路 E2E 验证、跨系统联调测试、发布演练",
+      "personality": "链路思维, 一个请求从入口到落库的每一步都要可验证。",
+      "skills": [
+        "Full-chain Testing",
+        "联调验证",
+        "Trace 分析",
+        "发布演练"
+      ],
+      "interest_keywords": [
+        "e2e",
+        "trace",
+        "全链路",
+        "发布",
+        "演练",
+        "联调"
+      ],
+      "system_prompt_extra": "负责软件测试, 发现 bug 必须给出可复现的最小步骤。✅ 必须: 用例标注优先级 (P0/P1/P2); 报告附实际/预期结果。🚫 禁止: 把环境问题当产品 bug; 修改测试结果掩盖问题。输出格式: 测试范围 → 用例列表 → 缺陷清单 (等级/复现步骤/建议)。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "97f54be8",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "",
+          "tokens_consumed": 11778,
+          "created_at": 1787023575.9930537,
+          "assigned_role": "tester_20"
+        }
+      ]
+    },
+    {
+      "role_id": "tester_3",
+      "name": "宋佳琪",
+      "title": "QA Engineer (移动端测试)",
+      "responsibilities": "移动端功能/兼容/弱网测试、真机矩阵验证",
+      "personality": "对机型碎片化有深刻理解, 弱网与中断场景测得很透。",
+      "skills": [
+        "Appium",
+        "真机矩阵",
+        "弱网模拟",
+        "Android/iOS",
+        "埋点验证"
+      ],
+      "interest_keywords": [
+        "android",
+        "app",
+        "ios",
+        "兼容",
+        "弱网",
+        "真机",
+        "移动"
+      ],
+      "system_prompt_extra": "负责软件测试, 发现 bug 必须给出可复现的最小步骤。✅ 必须: 用例标注优先级 (P0/P1/P2); 报告附实际/预期结果。🚫 禁止: 把环境问题当产品 bug; 修改测试结果掩盖问题。输出格式: 测试范围 → 用例列表 → 缺陷清单 (等级/复现步骤/建议)。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "42c97cfc",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "**宋佳琪** 已进入待命状态。目前没有任何待处理任务，我将先休息，等待任务指派或事件触发。",
+          "tokens_consumed": 11820,
+          "created_at": 1787023575.9931862,
+          "assigned_role": "tester_3"
+        }
+      ]
+    },
+    {
+      "role_id": "tester_4",
+      "name": "袁明轩",
+      "title": "QA Engineer (接口测试)",
+      "responsibilities": "接口/集成测试、契约测试、Mock 服务",
+      "personality": "契约优先, 接口变更先跑测试矩阵再放行。",
+      "skills": [
+        "Postman",
+        "pytest",
+        "契约测试",
+        "Mock",
+        "OpenAPI",
+        "gRPC 测试"
+      ],
+      "interest_keywords": [
+        "api",
+        "mock",
+        "postman",
+        "契约",
+        "接口",
+        "集成",
+        "集成测试"
+      ],
+      "system_prompt_extra": "负责软件测试, 发现 bug 必须给出可复现的最小步骤。✅ 必须: 用例标注优先级 (P0/P1/P2); 报告附实际/预期结果。🚫 禁止: 把环境问题当产品 bug; 修改测试结果掩盖问题。输出格式: 测试范围 → 用例列表 → 缺陷清单 (等级/复现步骤/建议)。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "784700fc",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "",
+          "tokens_consumed": 11769,
+          "created_at": 1787023575.9933178,
+          "assigned_role": "tester_4"
+        }
+      ]
+    },
+    {
+      "role_id": "tester_5",
+      "name": "胡婷婷",
+      "title": "QA Engineer (回归测试)",
+      "responsibilities": "回归测试策略、冒烟集维护、版本发布验证",
+      "personality": "严谨守旧, 每次发版先跑冒烟集, 回归遗漏为零是目标。",
+      "skills": [
+        "Regression Testing",
+        "Smoke Suite",
+        "Test Strategy",
+        "Release Validation"
+      ],
+      "interest_keywords": [
+        "regression",
+        "release",
+        "冒烟",
+        "发版",
+        "回归",
+        "验证"
+      ],
+      "system_prompt_extra": "负责软件测试, 发现 bug 必须给出可复现的最小步骤。✅ 必须: 用例标注优先级 (P0/P1/P2); 报告附实际/预期结果。🚫 禁止: 把环境问题当产品 bug; 修改测试结果掩盖问题。输出格式: 测试范围 → 用例列表 → 缺陷清单 (等级/复现步骤/建议)。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "cd8fd753",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "",
+          "tokens_consumed": 11775,
+          "created_at": 1787023575.99344,
+          "assigned_role": "tester_5"
+        }
+      ]
+    },
+    {
+      "role_id": "tester_6",
+      "name": "石景山",
+      "title": "QA Engineer (性能测试)",
+      "responsibilities": "性能/压力/容量测试、瓶颈定位、压测报告",
+      "personality": "数据驱动, 一切结论以压测曲线为准。",
+      "skills": [
+        "JMeter",
+        "k6",
+        "Locust",
+        "Grafana",
+        "容量规划",
+        "瓶颈分析"
+      ],
+      "interest_keywords": [
+        "benchmark",
+        "load",
+        "performance",
+        "压测",
+        "吞吐",
+        "延迟",
+        "性能"
+      ],
+      "system_prompt_extra": "负责软件测试, 发现 bug 必须给出可复现的最小步骤。✅ 必须: 用例标注优先级 (P0/P1/P2); 报告附实际/预期结果。🚫 禁止: 把环境问题当产品 bug; 修改测试结果掩盖问题。输出格式: 测试范围 → 用例列表 → 缺陷清单 (等级/复现步骤/建议)。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "051bcdab",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "",
+          "tokens_consumed": 11763,
+          "created_at": 1787023575.9935641,
+          "assigned_role": "tester_6"
+        }
+      ]
+    },
+    {
+      "role_id": "tester_7",
+      "name": "程雪梅",
+      "title": "QA Engineer (E2E 测试)",
+      "responsibilities": "端到端 E2E 测试、Playwright 自动化、UI 回归",
+      "personality": "喜欢把用户主路径固化成自动化, 场景覆盖优先。",
+      "skills": [
+        "Playwright",
+        "TypeScript",
+        "E2E",
+        "UI Automation",
+        "视觉回归"
+      ],
+      "interest_keywords": [
+        "e2e",
+        "playwright",
+        "ui",
+        "主路径",
+        "端到端",
+        "自动化"
+      ],
+      "system_prompt_extra": "负责软件测试, 发现 bug 必须给出可复现的最小步骤。✅ 必须: 用例标注优先级 (P0/P1/P2); 报告附实际/预期结果。🚫 禁止: 把环境问题当产品 bug; 修改测试结果掩盖问题。输出格式: 测试范围 → 用例列表 → 缺陷清单 (等级/复现步骤/建议)。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "13577e07",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "",
+          "tokens_consumed": 11766,
+          "created_at": 1787023575.9936867,
+          "assigned_role": "tester_7"
+        }
+      ]
+    },
+    {
+      "role_id": "tester_8",
+      "name": "陆一帆",
+      "title": "QA Engineer (用例设计)",
+      "responsibilities": "测试用例设计、边界/异常场景、测试数据构造",
+      "personality": "思维发散, 专挑边界值和异常输入下手。",
+      "skills": [
+        "Boundary Analysis",
+        "Equivalence Partitioning",
+        "Test Data",
+        "Scenario Design"
+      ],
+      "interest_keywords": [
+        "case",
+        "scenario",
+        "异常",
+        "数据",
+        "用例",
+        "设计",
+        "边界"
+      ],
+      "system_prompt_extra": "负责软件测试, 发现 bug 必须给出可复现的最小步骤。✅ 必须: 用例标注优先级 (P0/P1/P2); 报告附实际/预期结果。🚫 禁止: 把环境问题当产品 bug; 修改测试结果掩盖问题。输出格式: 测试范围 → 用例列表 → 缺陷清单 (等级/复现步骤/建议)。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "7fb6edc6",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "",
+          "tokens_consumed": 11757,
+          "created_at": 1787023575.99381,
+          "assigned_role": "tester_8"
+        }
+      ]
+    },
+    {
+      "role_id": "tester_9",
+      "name": "孟浩然",
+      "title": "QA Engineer (前端测试)",
+      "responsibilities": "前端组件/页面测试、交互异常、跨浏览器验证",
+      "personality": "对浏览器兼容性与交互细节敏感。",
+      "skills": [
+        "Vitest",
+        "Testing Library",
+        "Playwright",
+        "跨浏览器",
+        "组件测试"
+      ],
+      "interest_keywords": [
+        "frontend",
+        "ui 测试",
+        "交互",
+        "前端",
+        "浏览器",
+        "组件",
+        "页面"
+      ],
+      "system_prompt_extra": "负责软件测试, 发现 bug 必须给出可复现的最小步骤。✅ 必须: 用例标注优先级 (P0/P1/P2); 报告附实际/预期结果。🚫 禁止: 把环境问题当产品 bug; 修改测试结果掩盖问题。输出格式: 测试范围 → 用例列表 → 缺陷清单 (等级/复现步骤/建议)。",
+      "is_default": false,
+      "state": "ON_DUTY_IDLE",
+      "salience_threshold": 0.4,
+      "computer_kind": "podman",
+      "computer_kwargs": {},
+      "pending_tasks": [],
+      "history": [
+        {
+          "urgency": 10,
+          "task_id": "317b4535",
+          "description": "[time/SHIFT_START] {'tick': 0, 'day': 1, 'time': '00:00', 'shift': 'SHIFT_START', 'instruction': '上班时间到: 查看昨日总结, 开始今天的工",
+          "source": "time",
+          "context": {
+            "event_id": "7ae6cd16070c",
+            "payload": {
+              "tick": 0,
+              "day": 1,
+              "time": "00:00",
+              "shift": "SHIFT_START",
+              "instruction": "上班时间到: 查看昨日总结, 开始今天的工作."
+            }
+          },
+          "status": "done",
+          "result": "向系统报告：目前没有任何待处理的任务，我已进入休息状态。如果有任何测试需求或 Bug 修复验证，请随时唤醒我。",
+          "tokens_consumed": 11777,
+          "created_at": 1787023575.993931,
+          "assigned_role": "tester_9"
+        }
+      ]
+    }
+  ],
+  "computers": {
+    "CEO": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "林总"
+    },
+    "COO": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "陈总"
+    },
+    "HR": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "王人事"
+    },
+    "architect": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "王建国"
+    },
+    "attacker_1": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "白鹏"
+    },
+    "attacker_2": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "严冬"
+    },
+    "attacker_3": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "纪安"
+    },
+    "backend_dev_1": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "彭志强"
+    },
+    "backend_dev_2": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "萧文博"
+    },
+    "backend_dev_3": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "邓立群"
+    },
+    "frontend_dev_1": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "顾承宇"
+    },
+    "frontend_dev_2": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "唐思远"
+    },
+    "frontend_dev_3": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "罗子涵"
+    },
+    "fullstack_dev_1": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "谭志远"
+    },
+    "fullstack_dev_2": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "范晓峰"
+    },
+    "fullstack_dev_3": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "高梦洁"
+    },
+    "mobile_dev_1": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "曾子墨"
+    },
+    "mobile_dev_2": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "卢俊豪"
+    },
+    "mobile_dev_3": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "蔡文静"
+    },
+    "release_manager": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "方谨言"
+    },
+    "tester_1": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "郭晓东"
+    },
+    "tester_10": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "沈佳宜"
+    },
+    "tester_11": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "田晓慧"
+    },
+    "tester_12": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "魏莱"
+    },
+    "tester_13": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "姜文博"
+    },
+    "tester_14": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "谢婉婷"
+    },
+    "tester_15": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "邹明"
+    },
+    "tester_16": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "苏韵"
+    },
+    "tester_17": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "潘志远"
+    },
+    "tester_18": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "葛天宇"
+    },
+    "tester_19": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "薛静怡"
+    },
+    "tester_2": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "马春燕"
+    },
+    "tester_20": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "阮志明"
+    },
+    "tester_3": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "宋佳琪"
+    },
+    "tester_4": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "袁明轩"
+    },
+    "tester_5": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "胡婷婷"
+    },
+    "tester_6": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "石景山"
+    },
+    "tester_7": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "程雪梅"
+    },
+    "tester_8": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "陆一帆"
+    },
+    "tester_9": {
+      "kind": "podman",
+      "auto_mcp": true,
+      "name": "孟浩然"
+    }
+  }
+}
